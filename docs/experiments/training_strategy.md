@@ -42,6 +42,8 @@ DeepSeek 提到的“高原上有峡谷”的说法可以作为调参直觉：�
 
 Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top5。两版反复选到同一批股票，说明当前瓶颈更可能是排序输出过于固定，而不只是优化器震荡。后续优先查看 `prediction_scores.csv` 的完整候选排名，相关经验见 [prediction_diagnostics.md](prediction_diagnostics.md)。
 
+固定选股池的优先嫌疑是 `instrument` 被当作连续数值输入模型。下一步用 `noid` 档位移除该特征做对照，先看 top20/top50 重复度和外部分数是否改善，再决定是否保留股票身份信息。
+
 ## 5. 当前策略
 
 训练脚本现在默认使用：
@@ -101,7 +103,15 @@ sh tune.sh v1.2.7 smooth --skip-final
 
 `smooth` 与 `balanced` 保持相同模型、窗口、epoch、dropout 和 weight decay，只把优化器从 AdamW 换成 Lookahead。先用它判断 Lookahead 是否值得保留；不要同时叠加 cosine、SWA 或 EMA。
 
-`balanced`、`smooth` 和 `stable` 的 epoch 上限设为 15、早停耐心值设为 5。这个上限比最初的 5 轮更接近 `large`，能避免分数平滑增长时被硬截断；同时模型仍比 `large` 小，单个 epoch 更快。如果日志显示大多数窗口长期在第 3 到第 5 轮早停，说明上限不是瓶颈；如果最佳 epoch 多次出现在第 12 轮以后，再考虑把上限提高到 20。
+如果要测试固定选股池是否来自股票编号特征，用 `noid` 档位：
+
+```bash
+sh tune.sh v1.2.8 noid --skip-final
+```
+
+`noid` 与 `balanced` 保持相同模型和训练预算，只从模型输入特征中移除 `instrument`。股票代码仍用于分组和输出。
+
+`balanced`、`noid`、`smooth` 和 `stable` 的 epoch 上限设为 15、早停耐心值设为 5。这个上限比最初的 5 轮更接近 `large`，能避免分数平滑增长时被硬截断；同时模型仍比 `large` 小，单个 epoch 更快。如果日志显示大多数窗口长期在第 3 到第 5 轮早停，说明上限不是瓶颈；如果最佳 epoch 多次出现在第 12 轮以后，再考虑把上限提高到 20。
 
 ## 7. 平台期和震荡判断
 

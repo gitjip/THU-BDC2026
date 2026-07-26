@@ -67,6 +67,12 @@ feature_engineer_func_map = {
 }
 
 
+def select_feature_columns(feature_columns):
+	if config.get('use_instrument_feature', True):
+		return list(feature_columns)
+	return [column for column in feature_columns if column != 'instrument']
+
+
 def parse_args():
 	parser = argparse.ArgumentParser(description='基于提交截止日后的未来交易窗口生成 result.csv')
 	parser.add_argument(
@@ -113,7 +119,7 @@ def preprocess_predict_data(df, stockid2idx):
 	if config['feature_num'] not in feature_engineer_func_map:
 		raise ValueError(f"Unsupported feature_num: {config['feature_num']}")
 	feature_engineer = feature_engineer_func_map[config['feature_num']]
-	feature_columns = feature_cloums_map[config['feature_num']]
+	feature_columns = select_feature_columns(feature_cloums_map[config['feature_num']])
 
 	df = df.copy()
 	df = df.sort_values(['股票代码', '日期']).reset_index(drop=True)
@@ -131,6 +137,8 @@ def preprocess_predict_data(df, stockid2idx):
 	processed = processed.dropna(subset=['instrument']).copy()
 	processed['instrument'] = processed['instrument'].astype(np.int64)
 	processed['日期'] = pd.to_datetime(processed['日期'])
+	if not config.get('use_instrument_feature', True):
+		logger.info("预测集: 已从输入特征中移除 instrument，股票代码仅用于分组和输出")
 
 	return processed, feature_columns
 

@@ -254,6 +254,44 @@ def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_existing_summary(experiment_dir: Path) -> dict[str, dict]:
+    summary_path = experiment_dir / "summary.csv"
+    if not summary_path.exists():
+        return {}
+    summary = pd.read_csv(summary_path)
+    if "window" not in summary.columns:
+        return {}
+    return {
+        str(row["window"]): row.to_dict()
+        for _, row in summary.iterrows()
+    }
+
+
+def optional_float(value) -> float | None:
+    if value is None or value == "":
+        return None
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
+def stage_total_seconds(*values: float | None, fallback: float | None = None) -> float | None:
+    if values and all(value is not None for value in values):
+        return float(sum(value for value in values if value is not None))
+    if fallback is not None:
+        return fallback
+    known = [value for value in values if value is not None]
+    if known:
+        return float(sum(known))
+    return fallback
+
+
 def run_logged(command: list[str], env: dict[str, str], log_path: Path) -> float:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("运行命令: %s", " ".join(command))
@@ -311,6 +349,7 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
         "BDC_LEARNING_RATE",
         "BDC_WEIGHT_DECAY",
         "BDC_DROPOUT",
+        "BDC_USE_INSTRUMENT_FEATURE",
         "BDC_OPTIMIZER",
         "BDC_LOOKAHEAD_K",
         "BDC_LOOKAHEAD_ALPHA",
@@ -439,6 +478,7 @@ def run_window(
     version: str,
     window: WalkForwardWindow,
     resume: bool,
+    existing_row: dict | None = None,
 ) -> dict:
     window_dir = experiment_dir / "windows" / window.name
     model_dir = window_dir / "model"
@@ -447,8 +487,9 @@ def run_window(
     score_path = window_dir / "score.json"
     metadata_path = window_dir / "metadata.json"
     window_start_time = time.perf_counter()
-    train_seconds = None
-    predict_seconds = None
+    train_seconds = optional_float(existing_row.get("train_seconds")) if existing_row else None
+    predict_seconds = optional_float(existing_row.get("predict_seconds")) if existing_row else None
+    existing_window_seconds = optional_float(existing_row.get("window_seconds")) if existing_row else None
 
     log_section(
         f"{window.name} | as_of={window.as_of_date} | target={window.target_start_date} ~ {window.target_end_date}"
@@ -490,7 +531,12 @@ def run_window(
         )
 
     score = calculate_window_score(full_df, prediction_path, window.target_dates)
-    window_seconds = time.perf_counter() - window_start_time
+    elapsed_seconds = time.perf_counter() - window_start_time
+    window_seconds = stage_total_seconds(
+        train_seconds,
+        predict_seconds,
+        fallback=existing_window_seconds if existing_window_seconds is not None else elapsed_seconds,
+    )
     score["train_seconds"] = train_seconds
     score["train_duration"] = format_duration(train_seconds)
     score["predict_seconds"] = predict_seconds
@@ -529,14 +575,21 @@ def run_window(
     }
 
 
-def run_final(full_data_file: Path, experiment_dir: Path, publish_final: bool, resume: bool) -> dict:
+def run_final(
+    full_data_file: Path,
+    experiment_dir: Path,
+    publish_final: bool,
+    resume: bool,
+    existing_final: dict | None = None,
+) -> dict:
     final_dir = experiment_dir / "final"
     model_dir = final_dir / "model"
     result_path = final_dir / "result.csv"
     result_scores_path = final_dir / "result_scores.csv"
     final_start_time = time.perf_counter()
-    train_seconds = None
-    predict_seconds = None
+    train_seconds = optional_float(existing_final.get("train_seconds")) if existing_final else None
+    predict_seconds = optional_float(existing_final.get("predict_seconds")) if existing_final else None
+    existing_total_seconds = optional_float(existing_final.get("total_seconds")) if existing_final else None
 
     log_section("最终模型训练与预测")
 
@@ -565,7 +618,12 @@ def run_final(full_data_file: Path, experiment_dir: Path, publish_final: bool, r
         published_path = str(published.relative_to(REPO_ROOT))
         logger.info("已发布最终预测到: %s", published_path)
 
-    final_seconds = time.perf_counter() - final_start_time
+    elapsed_seconds = time.perf_counter() - final_start_time
+    final_seconds = stage_total_seconds(
+        train_seconds,
+        predict_seconds,
+        fallback=existing_total_seconds if existing_total_seconds is not None else elapsed_seconds,
+    )
     logger.info("最终流程完成: 耗时=%s", format_duration(final_seconds))
 
     return {
@@ -626,6 +684,8 @@ def main() -> None:
     if args.dry_run:
         return
 
+    existing_summary = read_existing_summary(experiment_dir) if args.resume else {}
+    previous_manifest = read_json(experiment_dir / "manifest.json") if args.resume else {}
     git_info = get_git_info()
     manifest = {
         "version": args.version,
@@ -643,7 +703,17 @@ def main() -> None:
 
     rows = []
     for window in windows:
-        rows.append(run_window(full_df, dates, experiment_dir, args.version, window, resume=args.resume))
+        rows.append(
+            run_window(
+                full_df,
+                dates,
+                experiment_dir,
+                args.version,
+                window,
+                resume=args.resume,
+                existing_row=existing_summary.get(window.name),
+            )
+        )
         write_summary(experiment_dir, rows)
 
     if rows:
@@ -654,7 +724,13 @@ def main() -> None:
         manifest["walk_forward_score_max"] = float(max(scores))
 
     if not args.skip_final:
-        manifest["final"] = run_final(Path(data_file).resolve(), experiment_dir, args.publish_final, resume=args.resume)
+        manifest["final"] = run_final(
+            Path(data_file).resolve(),
+            experiment_dir,
+            args.publish_final,
+            resume=args.resume,
+            existing_final=previous_manifest.get("final"),
+        )
 
     write_json(experiment_dir / "manifest.json", manifest)
     if args.create_tag:

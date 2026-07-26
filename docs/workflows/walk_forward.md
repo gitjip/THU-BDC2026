@@ -55,12 +55,15 @@ sh tune.sh quick --skip-final --resume
 | --- | --- | ---: | --- | ---: | ---: | ---: | --- | ---: |
 | `quick` | 平时调试 | 1 | 39 | 30 | 24 | 60 | d_model=64, layers=1 | 4 |
 | `balanced` | 常规调参 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
+| `noid` | 去股票编号对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
 | `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
 | `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
+
+`noid` 是 `balanced` 的特征对照：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。
 
 `smooth` 不是新模型，只是 `balanced` 的优化器对照：默认 `BDC_OPTIMIZER=lookahead`、`BDC_LOOKAHEAD_K=5`、`BDC_LOOKAHEAD_ALPHA=0.5`。它用于判断 Lookahead 是否能降低分数震荡和改善最差窗口。
 
@@ -68,23 +71,24 @@ sh tune.sh quick --skip-final --resume
 
 ## 5. 下一轮推荐对照
 
-`v1.2.4 balanced` 仍是 2 个窗口，和 `v1.2.5 stable`、`v1.2.1 large` 不完全可比。下一步先跑当前默认 3 个窗口的 `balanced`，再跑只改优化器的 `smooth`：
+`v1.2.6` 和 `v1.2.7` 显示 Lookahead 没有明显改变外部分数，完整排名暴露出固定选股池。下一步先跑 `noid`，验证移除 `instrument` 后 top20/top50 重复度是否下降：
 
 ```bash
-sh tune.sh v1.2.6 balanced --skip-final
+sh tune.sh v1.2.8 noid --skip-final
 ```
 
-再跑 Lookahead 对照：
+必要时再和当前默认 `balanced` 复核：
 
 ```bash
-sh tune.sh v1.2.7 smooth --skip-final
+sh tune.sh v1.2.9 balanced --skip-final
 ```
 
 比较时优先看：
 
 - `summary.csv` 的多窗口均值、最差窗口和耗时；
 - `manifest.json` 里的窗口日期是否一致；
-- `training_history.csv` 中 train loss、eval loss、eval final_score 是否出现明显过拟合或平台。
+- `training_history.csv` 中 train loss、eval loss、eval final_score 是否出现明显过拟合或平台；
+- `prediction_scores.csv` 的 top20/top50 是否仍长期重复。
 
 ## 6. 正式调参运行
 

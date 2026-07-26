@@ -56,6 +56,7 @@ config = {
     'early_stopping_patience': _env_int('BDC_EARLY_STOPPING_PATIENCE', 2 if fast_dev_mode else 3),
     'early_stopping_min_delta': _env_float('BDC_EARLY_STOPPING_MIN_DELTA', 1e-4),
     'dropout': _env_float('BDC_DROPOUT', 0.1),
+    'use_instrument_feature': _env_bool('BDC_USE_INSTRUMENT_FEATURE', True),
     'feature_num': feature_num,
     'max_grad_norm': 5.0,
     'enable_grad_clip': _env_bool('BDC_GRAD_CLIP', True),

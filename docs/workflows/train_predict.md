@@ -160,6 +160,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `learning_rate`：默认完整训练 `2e-5`，debug `3e-5`；可用 `BDC_LEARNING_RATE` 覆盖。
 - `lr_scheduler`：默认 `plateau`，验证 `final_score` 停滞时降低学习率。
 - `early_stopping_patience`：默认完整训练 3，debug 2；设为 0 可关闭早停。
+- `use_instrument_feature`：默认开启；可用 `BDC_USE_INSTRUMENT_FEATURE=0` 从模型输入中移除股票编号特征。
 - `stock_data_file`：默认 `None`，自动寻找数据；也可以用环境变量 `BDC_STOCK_DATA_FILE` 临时覆盖。
 
 常用环境变量：

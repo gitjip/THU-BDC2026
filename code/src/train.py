@@ -65,6 +65,12 @@ feature_engineer_func_map = {
 }
 
 
+def select_feature_columns(feature_columns):
+    if config.get('use_instrument_feature', True):
+        return list(feature_columns)
+    return [column for column in feature_columns if column != 'instrument']
+
+
 def _build_label_and_clean(processed, drop_small_open=True):
     """统一构建标签并清洗无效样本。"""
     processed = processed.copy()
@@ -87,7 +93,7 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
     if stockid2idx is None:
         raise ValueError("stockid2idx 不能为空")
     feature_engineer = feature_engineer_func_map[config['feature_num']]
-    feature_columns = feature_cloums_map[config['feature_num']]
+    feature_columns = select_feature_columns(feature_cloums_map[config['feature_num']])
 
     # 保证时序正确，避免 shift 标签错位
     df = df.copy()
@@ -110,6 +116,8 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
     processed['instrument'] = processed['instrument'].astype(np.int64)
 
     processed = _build_label_and_clean(processed, drop_small_open=drop_small_open)
+    if not config.get('use_instrument_feature', True):
+        logger.info("%s: 已从输入特征中移除 instrument，股票代码仅用于分组和输出", desc)
     return processed, feature_columns
 
 
