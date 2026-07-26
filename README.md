@@ -27,7 +27,7 @@
 统一管理训练与推理参数，包括：
 - 序列长度 `sequence_length`（默认60）；
 - 模型超参数（`d_model`、`nhead`、`num_layers` 等）；
-- 训练超参数（`batch_size`、`num_epochs`、`learning_rate`）；
+- 训练超参数（`batch_size`、`num_epochs`、`learning_rate`、学习率调度、早停）；
 - 排序损失权重参数（`pairwise_weight`、`top5_weight`、`base_weight`）；
 - 数据路径和输出路径（默认输出到 `output/`）。
 - 可用 `sh train.sh debug` 进入快速调试模式，限制训练日期和股票数量以缩短本地训练时间。
@@ -64,7 +64,7 @@
 	- 对真实Top-k样本施加更高权重。
 - 评估指标：`calculate_ranking_metrics()`
 	- 计算 `pred_return_sum`、`max_return_sum`、`ratio_pred`、`final_score` 等；
-	- 训练过程中以验证集 `final_score` 选择最优模型。
+	- 训练过程中以验证集 `final_score` 选择最优模型、动态调整学习率并按需早停。
 
 训练产物：
 - `best_model.pth`：最佳模型参数；
@@ -130,7 +130,7 @@ sh train.sh
 sh test.sh
 ```
 
-更详细的运行说明见 [GUIDE.md](GUIDE.md)。调参用的多窗口 walk-forward 流程见 [docs/workflows/walk_forward.md](docs/workflows/walk_forward.md)，平时优先用 `sh tune.sh quick --skip-final`。
+更详细的运行说明见 [GUIDE.md](GUIDE.md)。调参用的多窗口 walk-forward 流程见 [docs/workflows/walk_forward.md](docs/workflows/walk_forward.md)，训练速度与硬件取舍见 [docs/experiments/training_strategy.md](docs/experiments/training_strategy.md)。平时优先用 `sh tune.sh quick --skip-final`。
 
 ---
 

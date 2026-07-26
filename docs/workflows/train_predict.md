@@ -38,7 +38,9 @@ sh train.sh
 2. 统一股票代码为 6 位字符串；
 3. 用最近 `val_days` 个可打标签交易日做验证集；
 4. 用未来第 1 个到第 5 个交易日开盘价计算标签；
-5. 保存模型、标准化器和日志。
+5. 按验证集 `final_score` 保存最佳模型；
+6. 根据验证表现自动降低学习率，并在连续无明显提升时早停；
+7. 保存模型、标准化器和日志。
 
 主要输出：
 
@@ -56,10 +58,12 @@ sh train.sh debug
 
 debug 模式默认会：
 
-- 只使用最近 48 个训练目标交易日；
+- 使用 39 特征、30 日序列和较小的 Transformer；
+- 只使用最近 24 个训练目标交易日；
 - 验证集只取最近 5 个目标交易日；
-- 每个交易日固定抽样 120 只股票参与训练；
-- 保存到 `model/debug_60_158+39/`，不会覆盖正式模型；
+- 每个交易日固定抽样 60 只股票参与训练；
+- 最多训练 4 个 epoch，若验证分数连续 2 个 epoch 无明显提升会提前停止；
+- 保存到 `model/debug_30_39/`，不会覆盖正式模型；
 - 关闭 TensorBoard，减少调试时生成的文件。
 
 这样做是为了调试流程和代码错误，不是为了获得最佳成绩。完整训练仍使用 `sh train.sh`。
@@ -146,10 +150,13 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 
 - `sequence_length`：每只股票输入过去多少个交易日，默认 60。
 - `label_horizon`：标签跨度，默认未来第 5 个交易日。
-- `val_days`：验证集目标交易日数量，默认 20。
-- `train_target_days`：训练目标交易日数量限制，默认 0 表示不限制；debug 默认 48。
-- `max_stocks_per_day`：每个交易日抽样股票数，默认 0 表示不抽样；debug 默认 120。
-- `num_epochs`：训练轮数，当前默认 3；平时可用 `BDC_NUM_EPOCHS` 覆盖。
+- `val_days`：训练过程内部验证集目标交易日数量，默认 5。
+- `train_target_days`：训练目标交易日数量限制，默认 0 表示不限制；debug 默认 24。
+- `max_stocks_per_day`：每个交易日抽样股票数，默认 0 表示不抽样；debug 默认 60。
+- `num_epochs`：最大训练轮数，默认 6；平时可用 `BDC_NUM_EPOCHS` 覆盖，早停可能提前结束。
+- `learning_rate`：默认完整训练 `2e-5`，debug `3e-5`；可用 `BDC_LEARNING_RATE` 覆盖。
+- `lr_scheduler`：默认 `plateau`，验证 `final_score` 停滞时降低学习率。
+- `early_stopping_patience`：默认完整训练 3，debug 2；设为 0 可关闭早停。
 - `stock_data_file`：默认 `None`，自动寻找数据；也可以用环境变量 `BDC_STOCK_DATA_FILE` 临时覆盖。
 
 常用环境变量：
@@ -157,7 +164,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 ```bash
 BDC_FAST_DEV=1 sh train.sh
 BDC_TRAIN_TARGET_DAYS=80 BDC_MAX_STOCKS_PER_DAY=180 sh train.sh debug
-BDC_NUM_EPOCHS=1 sh train.sh debug
+BDC_NUM_EPOCHS=6 BDC_EARLY_STOPPING_PATIENCE=2 sh train.sh debug
 BDC_SUBMISSION_DATE=2026-08-02 sh test.sh
 BDC_TARGET_START_DATE=2026-08-08 sh test.sh
 BDC_MARKET_HOLIDAYS=2026-08-03 sh test.sh

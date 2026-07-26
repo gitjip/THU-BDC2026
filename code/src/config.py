@@ -15,10 +15,17 @@ def _env_int(name, default):
     return int(value)
 
 
+def _env_float(name, default):
+    value = os.environ.get(name)
+    if value in (None, ''):
+        return default
+    return float(value)
+
+
 # 配置参数
 fast_dev_mode = _env_bool('BDC_FAST_DEV', False)
-sequence_length = _env_int('BDC_SEQUENCE_LENGTH', 60)
-feature_num = os.environ.get('BDC_FEATURE_NUM', '158+39')
+sequence_length = _env_int('BDC_SEQUENCE_LENGTH', 30 if fast_dev_mode else 60)
+feature_num = os.environ.get('BDC_FEATURE_NUM', '39' if fast_dev_mode else '158+39')
 output_dir_prefix = 'debug_' if fast_dev_mode else ''
 config = {
     'sequence_length': sequence_length,   # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
@@ -26,22 +33,30 @@ config = {
     'prediction_horizon': 5,
     'submission_deadline_date': os.environ.get('BDC_SUBMISSION_DATE', '2026-08-02'),
     'market_holidays': os.environ.get('BDC_MARKET_HOLIDAYS', ''),
-    'val_days': _env_int('BDC_VAL_DAYS', 5 if fast_dev_mode else 20),
-    'train_target_days': _env_int('BDC_TRAIN_TARGET_DAYS', 48 if fast_dev_mode else 0),
-    'max_stocks_per_day': _env_int('BDC_MAX_STOCKS_PER_DAY', 120 if fast_dev_mode else 0),
+    'val_days': _env_int('BDC_VAL_DAYS', 5),
+    'train_target_days': _env_int('BDC_TRAIN_TARGET_DAYS', 24 if fast_dev_mode else 0),
+    'max_stocks_per_day': _env_int('BDC_MAX_STOCKS_PER_DAY', 60 if fast_dev_mode else 0),
     'fast_dev_mode': fast_dev_mode,
-    'd_model': _env_int('BDC_D_MODEL', 256),          # Transformer输入维度
-    'nhead': _env_int('BDC_NHEAD', 4),             # 注意力头数量
-    'num_layers': _env_int('BDC_NUM_LAYERS', 3),        # Transformer层数
-    'dim_feedforward': _env_int('BDC_DIM_FEEDFORWARD', 512), # 前馈网络维度
-    'batch_size': _env_int('BDC_BATCH_SIZE', 4),        # 排序任务batch_size可以小一些，因为每个batch包含更多股票
-    'num_epochs': _env_int('BDC_NUM_EPOCHS', 3),       # 默认训练多个epoch，调试可用环境变量继续覆盖
-    'learning_rate': 1e-5,  # 稍微降低学习率
+    'd_model': _env_int('BDC_D_MODEL', 64 if fast_dev_mode else 256),          # Transformer输入维度
+    'nhead': _env_int('BDC_NHEAD', 2 if fast_dev_mode else 4),             # 注意力头数量
+    'num_layers': _env_int('BDC_NUM_LAYERS', 1 if fast_dev_mode else 3),        # Transformer层数
+    'dim_feedforward': _env_int('BDC_DIM_FEEDFORWARD', 128 if fast_dev_mode else 512), # 前馈网络维度
+    'batch_size': _env_int('BDC_BATCH_SIZE', 8 if fast_dev_mode else 4),        # 排序任务batch_size可以小一些，因为每个batch包含更多股票
+    'num_epochs': _env_int('BDC_NUM_EPOCHS', 4 if fast_dev_mode else 6),       # 最大epoch数，早停可能提前结束
+    'learning_rate': _env_float('BDC_LEARNING_RATE', 3e-5 if fast_dev_mode else 2e-5),
+    'weight_decay': _env_float('BDC_WEIGHT_DECAY', 1e-5),
+    'lr_scheduler': os.environ.get('BDC_LR_SCHEDULER', 'plateau'),
+    'lr_factor': _env_float('BDC_LR_FACTOR', 0.5),
+    'lr_patience': _env_int('BDC_LR_PATIENCE', 1),
+    'min_learning_rate': _env_float('BDC_MIN_LR', 1e-6),
+    'early_stopping_patience': _env_int('BDC_EARLY_STOPPING_PATIENCE', 2 if fast_dev_mode else 3),
+    'early_stopping_min_delta': _env_float('BDC_EARLY_STOPPING_MIN_DELTA', 1e-4),
     'dropout': 0.1,
     'feature_num': feature_num,
     'max_grad_norm': 5.0,
+    'enable_grad_clip': _env_bool('BDC_GRAD_CLIP', True),
     'seed': 42,
-    'num_processes': _env_int('BDC_NUM_PROCESSES', 10),
+    'num_processes': _env_int('BDC_NUM_PROCESSES', 4 if fast_dev_mode else 6),
     'torch_num_threads': _env_int('BDC_TORCH_NUM_THREADS', 0),
     'enable_tensorboard': _env_bool('BDC_TENSORBOARD', not fast_dev_mode),
 

@@ -359,7 +359,7 @@ def train_ranking_model(model, dataloader, criterion, optimizer, device, epoch, 
         if batch_loss is not None:
             batch_loss = batch_loss / batch_size
             batch_loss.backward()
-            if not config.get('drop_clip', True):
+            if config.get('enable_grad_clip', True):
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config['max_grad_norm'])
                 if writer:
                     writer.add_scalar('train/grad_norm', grad_norm, global_step=epoch*len(dataloader)+local_step)
@@ -459,6 +459,59 @@ def evaluate_ranking_model(model, dataloader, criterion, device, writer, epoch):
     return avg_loss, total_metrics
 
 
+def get_current_lr(optimizer):
+    return optimizer.param_groups[0]['lr']
+
+
+def build_lr_scheduler(optimizer):
+    scheduler_type = str(config.get('lr_scheduler', 'plateau')).strip().lower()
+    if scheduler_type in {'', 'none', 'off', 'false'}:
+        return None
+
+    if scheduler_type == 'plateau':
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='max',
+            factor=config.get('lr_factor', 0.5),
+            patience=config.get('lr_patience', 1),
+            min_lr=config.get('min_learning_rate', 1e-6),
+        )
+
+    if scheduler_type == 'linear':
+        return torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=1.0,
+            end_factor=max(config.get('min_learning_rate', 1e-6) / config['learning_rate'], 0.01),
+            total_iters=max(config['num_epochs'], 1),
+        )
+
+    raise ValueError(f"Unsupported lr_scheduler: {config.get('lr_scheduler')}")
+
+
+def step_lr_scheduler(scheduler, final_score):
+    if scheduler is None:
+        return
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        scheduler.step(final_score)
+    else:
+        scheduler.step()
+
+
+def log_runtime_environment(device):
+    logger.info("训练设备: %s", device)
+    if device.type == 'cuda':
+        device_index = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device_index)
+        logger.info(
+            "CUDA 设备: %s | 显存=%.1fGB",
+            torch.cuda.get_device_name(device_index),
+            props.total_memory / (1024 ** 3),
+        )
+    else:
+        logger.info("CUDA 不可用，训练会主要依赖 CPU；Intel Arc 通常不会被 PyTorch CUDA 自动使用")
+    logger.info("CPU 核心数: %s", mp.cpu_count())
+
+
 def split_train_val_by_recent_trading_days(df, sequence_length):
     """按真实交易日划分验证集，并为验证集补足历史窗口上下文。"""
     return split_train_val_by_trading_days(
@@ -497,7 +550,7 @@ def main():
         device = torch.device('cpu')
     mode = 'debug' if config.get('fast_dev_mode') else 'full'
     logger.info("运行模式: %s", mode)
-    logger.info("训练设备: %s", device)
+    log_runtime_environment(device)
     logger.info("随机种子: %s", config.get('seed', 42))
     if torch_num_threads and torch_num_threads > 0:
         logger.info("PyTorch CPU 线程数: %s", torch.get_num_threads())
@@ -607,13 +660,32 @@ def main():
         pairwise_weight=config['pairwise_weight'],
         base_weight=config.get('base_weight', 1.0)
     )  # 使用加权排序损失
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config['learning_rate'], weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.2, total_iters=config['num_epochs'])
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config['learning_rate'],
+        weight_decay=config.get('weight_decay', 1e-5),
+    )
+    scheduler = build_lr_scheduler(optimizer)
+    logger.info(
+        "训练策略: epochs<=%s, lr=%s, weight_decay=%s, scheduler=%s, lr_patience=%s, early_stopping_patience=%s, grad_clip=%s",
+        config['num_epochs'],
+        config['learning_rate'],
+        config.get('weight_decay', 1e-5),
+        config.get('lr_scheduler', 'plateau'),
+        config.get('lr_patience', 1),
+        config.get('early_stopping_patience', 0),
+        config.get('enable_grad_clip', True),
+    )
     
     # 8. 排序模型训练
     if is_train:
         best_score = -float('inf')
         best_epoch = -1
+        epochs_without_improvement = 0
+        stopped_epoch = 0
+        stop_reason = 'max_epochs'
+        min_delta = config.get('early_stopping_min_delta', 1e-4)
+        early_stopping_patience = config.get('early_stopping_patience', 0)
         
         for epoch in range(config['num_epochs']):
             logger.info("=== Epoch %s/%s ===", epoch + 1, config['num_epochs'])
@@ -635,23 +707,56 @@ def main():
             logger.info("Eval Loss: %.4f", eval_loss)
             for k, v in eval_metrics.items():
                 logger.info("Eval %s: %.4f", k, v)
-            
-            # 学习率调度
-            scheduler.step()
-            if writer:
-                writer.add_scalar('train/learning_rate', scheduler.get_last_lr()[0], global_step=epoch)
-            
 
             # 保存最佳模型（基于final score）
             current_final_score = eval_metrics.get('final_score', 0.0)
-            if current_final_score > best_score:
+            if current_final_score > best_score + min_delta:
                 best_score = current_final_score
                 best_epoch = epoch + 1
+                epochs_without_improvement = 0
                 torch.save(model.state_dict(), os.path.join(output_dir, 'best_model.pth'))
                 logger.info("保存最佳模型: %s | final_score=%.4f", os.path.join(output_dir, 'best_model.pth'), best_score)
-        logger.info("训练完成: 最佳 epoch=%s, 最佳 final_score=%.4f", best_epoch, best_score)
+            else:
+                epochs_without_improvement += 1
+                logger.info(
+                    "验证 final_score 未明显提升: 当前=%.4f, 最佳=%.4f, 连续未提升=%s/%s",
+                    current_final_score,
+                    best_score,
+                    epochs_without_improvement,
+                    early_stopping_patience if early_stopping_patience else 'off',
+                )
+
+            previous_lr = get_current_lr(optimizer)
+            step_lr_scheduler(scheduler, current_final_score)
+            current_lr = get_current_lr(optimizer)
+            if writer:
+                writer.add_scalar('train/learning_rate', current_lr, global_step=epoch)
+            if current_lr != previous_lr:
+                logger.info("学习率调整: %.8f -> %.8f", previous_lr, current_lr)
+            else:
+                logger.info("当前学习率: %.8f", current_lr)
+
+            stopped_epoch = epoch + 1
+            if early_stopping_patience and epochs_without_improvement >= early_stopping_patience:
+                stop_reason = f'early_stopping_patience_{early_stopping_patience}'
+                logger.info(
+                    "触发早停: 连续 %s 个 epoch 未超过最佳分数 %.4f + min_delta %.6f",
+                    epochs_without_improvement,
+                    best_score,
+                    min_delta,
+                )
+                break
+
+        logger.info(
+            "训练完成: 最佳 epoch=%s, 最佳 final_score=%.4f, 实际 epoch=%s, 结束原因=%s",
+            best_epoch,
+            best_score,
+            stopped_epoch,
+            stop_reason,
+        )
         with open(os.path.join(output_dir, 'final_score.txt'), 'w') as f:
             f.write(f"Best epoch: {best_epoch}\nBest final_score: {best_score:.6f}\n")
+            f.write(f"Stopped epoch: {stopped_epoch}\nStop reason: {stop_reason}\n")
 
         if writer:
             writer.close()

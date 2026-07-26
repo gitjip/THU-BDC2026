@@ -5,6 +5,7 @@
 - 训练与正式预测流程：[docs/workflows/train_predict.md](docs/workflows/train_predict.md)
 - walk-forward 调参与版本化运行：[docs/workflows/walk_forward.md](docs/workflows/walk_forward.md)
 - 语义化版本和实验产物说明：[docs/experiments/versioning.md](docs/experiments/versioning.md)
+- 训练策略与硬件取舍：[docs/experiments/training_strategy.md](docs/experiments/training_strategy.md)
 - 赛事原始文档：[docs/contest/](docs/contest/)
 
 当前阶段只需要提交 `output/result.csv`。默认训练和预测入口仍是：
