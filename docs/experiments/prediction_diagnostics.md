@@ -77,7 +77,24 @@ sh tune.sh v1.2.8 noid --skip-final
 
 `noid` 只是不把 `instrument` 输入模型。股票代码仍用于数据分组、序列构造、打分和输出，不会影响提交文件格式。
 
-## 5. resume 产物注意
+## 5. v1.2.8 noid 后续
+
+`v1.2.8 noid` 的多窗口均值改善，说明移除 `instrument` 是值得继续观察的方向。但完整排名也显示，模型更容易选到高波动股票，第二个窗口表现明显拖累均值。
+
+下一步用 `noid-stable` 做低风险对照：
+
+```bash
+sh tune.sh v1.2.9 noid-stable --skip-final
+```
+
+判断重点不是单看均值，还要看：
+
+- 最差窗口是否改善；
+- top20/top50 是否仍有足够变化；
+- top5 是否继续集中在高波动股票；
+- `prediction_scores.csv` 中入选股票和未入选股票的 `pred_score` 差距是否过大。
+
+## 6. resume 产物注意
 
 早期版本用 `--resume` 补预测诊断文件时，可能会把 `summary.csv` 中已有训练耗时覆盖为空。后续流程会尽量从旧 `summary.csv` 和 `manifest.json` 保留已有耗时。
 

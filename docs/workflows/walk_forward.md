@@ -56,6 +56,7 @@ sh tune.sh quick --skip-final --resume
 | `quick` | 平时调试 | 1 | 39 | 30 | 24 | 60 | d_model=64, layers=1 | 4 |
 | `balanced` | 常规调参 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
 | `noid` | 去股票编号对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
+| `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
 | `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
@@ -65,22 +66,25 @@ sh tune.sh quick --skip-final --resume
 
 `noid` 是 `balanced` 的特征对照：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。
 
+`noid-stable` 是 `noid` 的正则化对照：继续移除 `instrument`，同时设置 `dropout=0.2`、`weight_decay=1e-4`。它用于检查 `noid` 倾向高波动股票的问题是否能通过更强正则化缓解。
+
 `smooth` 不是新模型，只是 `balanced` 的优化器对照：默认 `BDC_OPTIMIZER=lookahead`、`BDC_LOOKAHEAD_K=5`、`BDC_LOOKAHEAD_ALPHA=0.5`。它用于判断 Lookahead 是否能降低分数震荡和改善最差窗口。
 
 `stable` 不是新架构，只是 `balanced` 的正则化对照：默认 3 个窗口、`dropout=0.2`、`weight_decay=1e-4`。它和 `balanced` 使用相同的模型规模、epoch 上限和早停耐心值，方便只比较正则化差异。如果它比同窗口 `balanced` 更稳，说明后续可以继续沿正则化方向调；如果没有改善，就不要继续在 dropout 上耗时间。
 
 ## 5. 下一轮推荐对照
 
-`v1.2.6` 和 `v1.2.7` 显示 Lookahead 没有明显改变外部分数，完整排名暴露出固定选股池。下一步先跑 `noid`，验证移除 `instrument` 后 top20/top50 重复度是否下降：
+`v1.2.6` 和 `v1.2.7` 显示 Lookahead 没有明显改变外部分数，完整排名暴露出固定选股池。`v1.2.8 noid` 去掉 `instrument` 后多窗口均值改善，但窗口 2 仍明显拖累，并且 top5 偏向高波动股票。下一步可以跑 `noid-stable`，只在 `noid` 基础上增加正则化：
 
 ```bash
-sh tune.sh v1.2.8 noid --skip-final
+sh tune.sh v1.2.9 noid-stable --skip-final
 ```
 
-必要时再和当前默认 `balanced` 复核：
+必要时再和当前默认 `balanced` 或原始 `noid` 复核：
 
 ```bash
 sh tune.sh v1.2.9 balanced --skip-final
+sh tune.sh v1.2.9 noid --skip-final
 ```
 
 比较时优先看：
@@ -104,9 +108,12 @@ sh tune.sh v1.2.0
 sh tune.sh v1.2.0 --windows 5
 sh tune.sh v1.2.0 --windows 5 --step-days 5
 sh tune.sh v1.2.0 --data-file data/stock_data.csv
+sh tune.sh v1.2.9 noid-stable --skip-final
 sh tune.sh v1.2.0 large --windows 3
 sh tune.sh v1.2.0 full --windows 3
 ```
+
+新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 
 默认不覆盖正式提交文件。最终预测会保存在：
 
