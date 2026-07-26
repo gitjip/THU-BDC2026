@@ -45,6 +45,9 @@ config = {
     'num_epochs': _env_int('BDC_NUM_EPOCHS', 4 if fast_dev_mode else 6),       # 最大epoch数，早停可能提前结束
     'learning_rate': _env_float('BDC_LEARNING_RATE', 3e-5 if fast_dev_mode else 2e-5),
     'weight_decay': _env_float('BDC_WEIGHT_DECAY', 1e-5),
+    'optimizer': os.environ.get('BDC_OPTIMIZER', 'adamw'),
+    'lookahead_k': _env_int('BDC_LOOKAHEAD_K', 5),
+    'lookahead_alpha': _env_float('BDC_LOOKAHEAD_ALPHA', 0.5),
     'lr_scheduler': os.environ.get('BDC_LR_SCHEDULER', 'plateau'),
     'lr_factor': _env_float('BDC_LR_FACTOR', 0.5),
     'lr_patience': _env_int('BDC_LR_PATIENCE', 1),

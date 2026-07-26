@@ -501,6 +501,85 @@ def evaluate_ranking_model(model, dataloader, criterion, device, writer, epoch):
     return avg_loss, total_metrics
 
 
+class LookaheadOptimizer:
+    """Lightweight Lookahead wrapper for an existing PyTorch optimizer."""
+
+    def __init__(self, optimizer, k=5, alpha=0.5):
+        if k < 1:
+            raise ValueError("lookahead_k must be >= 1")
+        if not 0.0 < alpha <= 1.0:
+            raise ValueError("lookahead_alpha must be in (0, 1]")
+        self.optimizer = optimizer
+        self.k = int(k)
+        self.alpha = float(alpha)
+        self.param_groups = optimizer.param_groups
+        self.state = optimizer.state
+        self._step_count = 0
+        self._slow_weights = [
+            [param.detach().clone() for param in group['params']]
+            for group in self.param_groups
+        ]
+        for group in self._slow_weights:
+            for slow_weight in group:
+                slow_weight.requires_grad = False
+
+    def zero_grad(self):
+        self.optimizer.zero_grad()
+
+    def step(self):
+        loss = self.optimizer.step()
+        self._step_count += 1
+        if self._step_count % self.k == 0:
+            for group, slow_group in zip(self.param_groups, self._slow_weights):
+                for param, slow_weight in zip(group['params'], slow_group):
+                    if param.grad is None:
+                        continue
+                    slow_weight.add_(param.data - slow_weight, alpha=self.alpha)
+                    param.data.copy_(slow_weight)
+        return loss
+
+    def state_dict(self):
+        state = self.optimizer.state_dict()
+        state['lookahead'] = {
+            'k': self.k,
+            'alpha': self.alpha,
+            'step_count': self._step_count,
+            'slow_weights': self._slow_weights,
+        }
+        return state
+
+    def load_state_dict(self, state_dict):
+        lookahead_state = state_dict.pop('lookahead', None)
+        self.optimizer.load_state_dict(state_dict)
+        if lookahead_state:
+            self.k = int(lookahead_state.get('k', self.k))
+            self.alpha = float(lookahead_state.get('alpha', self.alpha))
+            self._step_count = int(lookahead_state.get('step_count', self._step_count))
+            self._slow_weights = lookahead_state.get('slow_weights', self._slow_weights)
+
+
+def build_optimizer(model):
+    base_optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config['learning_rate'],
+        weight_decay=config.get('weight_decay', 1e-5),
+    )
+    optimizer_type = str(config.get('optimizer', 'adamw')).strip().lower()
+    if optimizer_type == 'adamw':
+        return base_optimizer
+    if optimizer_type == 'lookahead':
+        return LookaheadOptimizer(
+            base_optimizer,
+            k=config.get('lookahead_k', 5),
+            alpha=config.get('lookahead_alpha', 0.5),
+        )
+    raise ValueError(f"Unsupported optimizer: {config.get('optimizer')}")
+
+
+def get_scheduler_optimizer(optimizer):
+    return optimizer.optimizer if isinstance(optimizer, LookaheadOptimizer) else optimizer
+
+
 def get_current_lr(optimizer):
     return optimizer.param_groups[0]['lr']
 
@@ -711,17 +790,16 @@ def main():
         pairwise_weight=config['pairwise_weight'],
         base_weight=config.get('base_weight', 1.0)
     )  # 使用加权排序损失
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config['learning_rate'],
-        weight_decay=config.get('weight_decay', 1e-5),
-    )
-    scheduler = build_lr_scheduler(optimizer)
+    optimizer = build_optimizer(model)
+    scheduler = build_lr_scheduler(get_scheduler_optimizer(optimizer))
     logger.info(
-        "训练策略: epochs<=%s, lr=%s, weight_decay=%s, scheduler=%s, lr_patience=%s, lr_threshold=%s, early_stopping_patience=%s, grad_clip=%s",
+        "训练策略: epochs<=%s, lr=%s, weight_decay=%s, optimizer=%s, lookahead_k=%s, lookahead_alpha=%s, scheduler=%s, lr_patience=%s, lr_threshold=%s, early_stopping_patience=%s, grad_clip=%s",
         config['num_epochs'],
         config['learning_rate'],
         config.get('weight_decay', 1e-5),
+        config.get('optimizer', 'adamw'),
+        config.get('lookahead_k', 5),
+        config.get('lookahead_alpha', 0.5),
         config.get('lr_scheduler', 'plateau'),
         config.get('lr_patience', 1),
         config.get('lr_threshold', 1e-4),

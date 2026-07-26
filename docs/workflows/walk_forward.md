@@ -54,27 +54,30 @@ sh tune.sh quick --skip-final --resume
 | 档位 | 用途 | 默认窗口 | 特征 | 序列 | 训练目标日 | 每日股票 | 模型 | 最大 epoch |
 | --- | --- | ---: | --- | ---: | ---: | ---: | --- | ---: |
 | `quick` | 平时调试 | 1 | 39 | 30 | 24 | 60 | d_model=64, layers=1 | 4 |
-| `balanced` | 常规调参 | 2 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
+| `balanced` | 常规调参 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
+| `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
 | `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以 epoch 上限接近 `large`，但仍使用小模型。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
+
+`smooth` 不是新模型，只是 `balanced` 的优化器对照：默认 `BDC_OPTIMIZER=lookahead`、`BDC_LOOKAHEAD_K=5`、`BDC_LOOKAHEAD_ALPHA=0.5`。它用于判断 Lookahead 是否能降低分数震荡和改善最差窗口。
 
 `stable` 不是新架构，只是 `balanced` 的正则化对照：默认 3 个窗口、`dropout=0.2`、`weight_decay=1e-4`。它和 `balanced` 使用相同的模型规模、epoch 上限和早停耐心值，方便只比较正则化差异。如果它比同窗口 `balanced` 更稳，说明后续可以继续沿正则化方向调；如果没有改善，就不要继续在 dropout 上耗时间。
 
 ## 5. 下一轮推荐对照
 
-`v1.2.1 large` 已经跑过 3 个窗口，但它和默认 2 窗口的 `balanced` 不完全可比。下一步先跑同样 3 个窗口的 `balanced`，不要频繁改默认训练预算：
+`v1.2.4 balanced` 仍是 2 个窗口，和 `v1.2.5 stable`、`v1.2.1 large` 不完全可比。下一步先跑当前默认 3 个窗口的 `balanced`，再跑只改优化器的 `smooth`：
 
 ```bash
-sh tune.sh v1.2.2 balanced --windows 3
+sh tune.sh v1.2.6 balanced --skip-final
 ```
 
-再跑正则化对照：
+再跑 Lookahead 对照：
 
 ```bash
-sh tune.sh v1.2.3 stable
+sh tune.sh v1.2.7 smooth --skip-final
 ```
 
 比较时优先看：

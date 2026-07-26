@@ -28,11 +28,21 @@ DeepSeek 提到的“高原上有峡谷”的说法可以作为调参直觉：�
 
 因此，`large` 继续保留为慢速候选复核档，不进入日常默认。下一轮优先跑同样 3 个窗口的 `balanced`，确认慢模型是否真的有收益。
 
-## 3. 当前策略
+## 3. v1.2.4 到 v1.2.5 观察
+
+`v1.2.4 balanced` 使用 15 个 epoch 上限和早停耐心值 5，但仍只跑了默认 2 个窗口，不能和 3 窗口的 `stable/large` 直接比较。两个窗口外部分数仍与之前一致：`-0.006730`、`-0.038214`。
+
+`v1.2.5 stable` 使用 3 个窗口、`dropout=0.2`、`weight_decay=1e-4`、15 个 epoch 上限。3 个窗口分数为 `-0.044707`、`-0.043543`、`-0.055497`，均值约 `-0.047915`，比 `large` 更平稳但均值没有更好。
+
+延长 epoch 后，多数训练仍在第 7 到第 10 轮早停，最佳内部验证 epoch 多在第 2 到第 5 轮。这说明单纯增加 epoch 不是主要突破口。下一步要单独测试优化器稳定性，例如 `smooth` 档位的 Lookahead，而不是继续同时改模型容量、正则化和学习率。
+
+## 4. 当前策略
 
 训练脚本现在默认使用：
 
 - `ReduceLROnPlateau`：验证 `final_score` 停滞时把学习率乘以 `lr_factor`；
+- `AdamW`：默认优化器；
+- `Lookahead`：可通过 `BDC_OPTIMIZER=lookahead` 开启，用于单独测试抗震荡效果；
 - 早停：连续多个 epoch 没有超过最佳分数加 `early_stopping_min_delta` 时停止；
 - 梯度裁剪：默认按 `max_grad_norm=5.0` 裁剪，降低训练不稳定风险；
 - `training_history.csv`：逐 epoch 记录 train/eval loss、final_score、学习率、梯度范数和耗时；
@@ -40,7 +50,7 @@ DeepSeek 提到的“高原上有峡谷”的说法可以作为调参直觉：�
 
 这些设置不会改变“用过去预测未来”的训练/预测语义，只是减少无效训练，并让调参日志更容易判断。
 
-## 4. 本机参数
+## 5. 本机参数
 
 本机配置是 32GB 内存、Intel Core Ultra 5 225H、Intel Arc 130T。实际训练通常走 CPU。
 
@@ -77,9 +87,17 @@ sh tune.sh v1.2.3 stable --skip-final
 
 `stable` 基于 `balanced` 的小模型，默认 3 个窗口、`dropout=0.2`、`weight_decay=1e-4`。它用于单独观察正则化能否缓解震荡，不用于替代正式冲分配置。
 
-`balanced` 和 `stable` 的 epoch 上限设为 15、早停耐心值设为 5。这个上限比最初的 5 轮更接近 `large`，能避免分数平滑增长时被硬截断；同时模型仍比 `large` 小，单个 epoch 更快。如果日志显示大多数窗口长期在第 3 到第 5 轮早停，说明上限不是瓶颈；如果最佳 epoch 多次出现在第 12 轮以后，再考虑把上限提高到 20。
+如果要测试优化器抗震荡，而不是更大的模型或更强正则化，用 `smooth` 档位：
 
-## 5. 平台期和震荡判断
+```bash
+sh tune.sh v1.2.7 smooth --skip-final
+```
+
+`smooth` 与 `balanced` 保持相同模型、窗口、epoch、dropout 和 weight decay，只把优化器从 AdamW 换成 Lookahead。先用它判断 Lookahead 是否值得保留；不要同时叠加 cosine、SWA 或 EMA。
+
+`balanced`、`smooth` 和 `stable` 的 epoch 上限设为 15、早停耐心值设为 5。这个上限比最初的 5 轮更接近 `large`，能避免分数平滑增长时被硬截断；同时模型仍比 `large` 小，单个 epoch 更快。如果日志显示大多数窗口长期在第 3 到第 5 轮早停，说明上限不是瓶颈；如果最佳 epoch 多次出现在第 12 轮以后，再考虑把上限提高到 20。
+
+## 6. 平台期和震荡判断
 
 优先看每个模型目录里的：
 
@@ -94,9 +112,9 @@ train.log
 - train loss 也不降，且 `avg_grad_norm` 很小：可能欠拟合、学习率过低或梯度太弱。
 - train loss 下降，但 eval loss 上升、eval final_score 震荡：更像过拟合或验证窗口噪声。
 - walk-forward 外部分数和训练内部 `final_score` 不一致是正常的，调参最终以后者之外的 `summary.csv` 多窗口均值为主。
-- 对比不同 profile 时，先保证窗口一致。`v1.2.1 large` 和 2 窗口 `balanced` 不能直接下定论，只能作为参考。
+- 对比不同 profile 时，先保证窗口一致。`v1.2.1 large`、2 窗口 `balanced`、3 窗口 `stable` 不能直接下定论，只能作为参考。
 
-## 6. 赛方机器约束
+## 7. 赛方机器约束
 
 赛事文档要求代码可在 i7-13650H、16GB 内存、RTX 4060 8GB 显存、50GB 存储上运行；预测不超过 5 分钟，训练不超过 8 小时，运行时不得联网。
 
