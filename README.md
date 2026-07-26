@@ -30,6 +30,7 @@
 - 训练超参数（`batch_size`、`num_epochs`、`learning_rate`）；
 - 排序损失权重参数（`pairwise_weight`、`top5_weight`、`base_weight`）；
 - 数据路径和输出路径（默认输出到 `output/`）。
+- 可用 `sh train.sh debug` 进入快速调试模式，限制训练日期和股票数量以缩短本地训练时间。
 
 ### [model.py](model.py)
 定义核心模型 `StockTransformer`，主要由以下模块组成：
@@ -81,6 +82,8 @@
 5. 按分数降序取前5只，输出到 `output/result.csv`：
 	 - `stock_id`
 	 - `weight`（固定 `0.2`）
+
+可通过 `--as-of-date YYYY-MM-DD` 指定预测基准日；如果当天无交易数据，会使用不晚于该日期的最近交易日。
 
 ### [get_stock_data.py](get_stock_data.py)
 数据抓取脚本（Baostock）：

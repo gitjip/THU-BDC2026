@@ -528,7 +528,15 @@ def create_dataset(data, features, sequence_length, ranking_data_path=None):
     """保持原有接口，但内部调用新的排序数据集创建函数"""
     return create_ranking_dataset_multiprocess(data, features, sequence_length, ranking_data_path)
 
-def create_ranking_dataset_vectorized(data, features, sequence_length, ranking_data_path=None, min_window_end_date=None):
+def create_ranking_dataset_vectorized(
+    data,
+    features,
+    sequence_length,
+    ranking_data_path=None,
+    min_window_end_date=None,
+    max_stocks_per_date=0,
+    stock_sample_seed=42,
+):
     """
     向量化加速版本：预计算每只股票的所有滑动窗口，再按日期聚合。
     保持与原函数完全相同的输出格式。
@@ -598,6 +606,10 @@ def create_ranking_dataset_vectorized(data, features, sequence_length, ranking_d
 
         if len(group) < 10:
             continue
+
+        if max_stocks_per_date and len(group) > max_stocks_per_date:
+            date_seed = int(pd.Timestamp(date).strftime('%Y%m%d')) + stock_sample_seed
+            group = group.sample(n=max_stocks_per_date, random_state=date_seed).sort_values('stock_code')
         
         # 提取数据
         day_seqs = np.stack(group['seq'].values)          # (N, L, F)

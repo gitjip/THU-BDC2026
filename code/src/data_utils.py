@@ -198,6 +198,7 @@ def split_train_val_by_trading_days(
     sequence_length: int,
     val_days: int,
     label_horizon: int,
+    train_target_days: int = 0,
     logger: logging.Logger | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Timestamp, pd.Timestamp]:
     dates = get_trading_dates(df)
@@ -216,17 +217,30 @@ def split_train_val_by_trading_days(
     val_start = pd.Timestamp(labelable_dates[val_start_idx])
     val_end = pd.Timestamp(labelable_dates[-1])
 
+    first_train_target_idx = sequence_length - 1
+    if train_target_days and train_target_days > 0:
+        first_train_target_idx = max(first_train_target_idx, val_start_idx - train_target_days)
+    train_context_start_idx = max(0, first_train_target_idx - sequence_length + 1)
+    train_context_start = pd.Timestamp(dates[train_context_start_idx])
+    train_target_start = pd.Timestamp(dates[first_train_target_idx])
+    train_target_end = pd.Timestamp(dates[val_start_idx - 1])
+
     context_start_idx = max(0, val_start_idx - sequence_length + 1)
     val_context_start = pd.Timestamp(dates[context_start_idx])
 
-    train_df = df[df["日期"] < val_start].copy()
+    train_df = df[(df["日期"] >= train_context_start) & (df["日期"] < val_start)].copy()
     val_df = df[df["日期"] >= val_context_start].copy()
 
     if train_df.empty or val_df.empty:
         raise ValueError("训练集或验证集为空，请检查数据时间范围")
 
     if logger:
-        logger.info("训练目标日期: %s ~ %s", train_df["日期"].min().date(), train_df["日期"].max().date())
+        logger.info("训练目标日期: %s ~ %s", train_target_start.date(), train_target_end.date())
+        logger.info(
+            "训练取数范围: %s ~ %s (包含序列上下文)",
+            train_df["日期"].min().date(),
+            train_df["日期"].max().date(),
+        )
         logger.info("验证目标日期: %s ~ %s", val_start.date(), val_end.date())
         logger.info(
             "验证取数范围: %s ~ %s (包含 %s 个交易日上下文)",

@@ -532,6 +532,7 @@ def split_train_val_by_recent_trading_days(df, sequence_length):
         sequence_length=sequence_length,
         val_days=config.get('val_days', 20),
         label_horizon=config.get('label_horizon', 5),
+        train_target_days=config.get('train_target_days', 0),
         logger=logger,
     )
 
@@ -543,6 +544,9 @@ def main():
     os.makedirs(output_dir,exist_ok=True)
     setup_logging("bdc.train", os.path.join(output_dir, 'train.log'))
     logger = logging.getLogger("bdc.train")
+    torch_num_threads = config.get('torch_num_threads', 0)
+    if torch_num_threads and torch_num_threads > 0:
+        torch.set_num_threads(torch_num_threads)
 
     # 保存在output_dir中保存当前的配置文件，以便复现
     data_path = config['data_path']
@@ -550,15 +554,25 @@ def main():
         json.dump(config, f, indent=4, ensure_ascii=False)
         f.write('\n')
     is_train = True
-    writer = SummaryWriter(log_dir=os.path.join(output_dir, 'log')) if is_train else None
+    writer = SummaryWriter(log_dir=os.path.join(output_dir, 'log')) if is_train and config.get('enable_tensorboard', True) else None
     if torch.cuda.is_available():
         device = torch.device('cuda')
     elif torch.backends.mps.is_available():
         device = torch.device('mps')
     else:
         device = torch.device('cpu')
+    mode = 'debug' if config.get('fast_dev_mode') else 'full'
+    logger.info("运行模式: %s", mode)
     logger.info("训练设备: %s", device)
     logger.info("随机种子: %s", config.get('seed', 42))
+    if torch_num_threads and torch_num_threads > 0:
+        logger.info("PyTorch CPU 线程数: %s", torch.get_num_threads())
+    if config.get('train_target_days', 0) or config.get('max_stocks_per_day', 0):
+        logger.info(
+            "调试采样: train_target_days=%s, max_stocks_per_day=%s",
+            config.get('train_target_days', 0),
+            config.get('max_stocks_per_day', 0),
+        )
     
     # 1. 数据加载
     full_df, data_file = load_stock_data(
@@ -605,14 +619,18 @@ def main():
         train_data,
         features,
         config['sequence_length'],
-        ranking_data_path=config.get('train_ranking_data_path')
+        ranking_data_path=config.get('train_ranking_data_path'),
+        max_stocks_per_date=config.get('max_stocks_per_day', 0),
+        stock_sample_seed=config.get('seed', 42),
     )
     val_sequences, val_targets, val_relevance, val_stock_indices = create_ranking_dataset_vectorized(
         val_data,
         features,
         config['sequence_length'],
         ranking_data_path=config.get('val_ranking_data_path'),
-        min_window_end_date=val_start.strftime('%Y-%m-%d')
+        min_window_end_date=val_start.strftime('%Y-%m-%d'),
+        max_stocks_per_date=config.get('max_stocks_per_day', 0),
+        stock_sample_seed=config.get('seed', 42),
     )
 
     logger.info("训练集样本数: %s", len(train_sequences))

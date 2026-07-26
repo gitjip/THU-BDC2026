@@ -1,6 +1,7 @@
 import os
 import multiprocessing as mp
 import logging
+import argparse
 
 import joblib
 import numpy as np
@@ -54,6 +55,21 @@ feature_engineer_func_map = {
 }
 
 
+def parse_args():
+	parser = argparse.ArgumentParser(description='基于指定交易日生成 result.csv')
+	parser.add_argument(
+		'--as-of-date',
+		default=os.environ.get('BDC_PREDICT_DATE'),
+		help='预测基准日T，默认使用数据中最新交易日；若当天无数据则使用不晚于该日期的最近交易日',
+	)
+	parser.add_argument(
+		'--output',
+		default=config.get('prediction_output_path', os.path.join('./output/', 'result.csv')),
+		help='预测结果输出路径，默认 ./output/result.csv',
+	)
+	return parser.parse_args()
+
+
 def preprocess_predict_data(df, stockid2idx):
 	if config['feature_num'] not in feature_engineer_func_map:
 		raise ValueError(f"Unsupported feature_num: {config['feature_num']}")
@@ -98,11 +114,31 @@ def build_inference_sequences(data, features, sequence_length, stock_ids, latest
 	return np.asarray(sequences, dtype=np.float32), sequence_stock_ids
 
 
+def resolve_as_of_date(raw_df, requested_date):
+	available_dates = pd.DatetimeIndex(sorted(raw_df['日期'].unique()))
+	if requested_date is None:
+		return pd.Timestamp(available_dates[-1])
+
+	requested = pd.to_datetime(requested_date, errors='coerce')
+	if pd.isna(requested):
+		raise ValueError(f'无法解析 --as-of-date: {requested_date}')
+	requested = requested.normalize()
+	candidates = available_dates[available_dates <= requested]
+	if len(candidates) == 0:
+		raise ValueError(f'数据中没有不晚于 {requested.date()} 的交易日')
+
+	as_of_date = pd.Timestamp(candidates[-1])
+	if as_of_date != requested:
+		logger.info("指定日期 %s 无数据，改用最近交易日 %s", requested.date(), as_of_date.date())
+	return as_of_date
+
+
 def main():
 	global logger
+	args = parse_args()
 	model_path = os.path.join(config['output_dir'], 'best_model.pth')
 	scaler_path = os.path.join(config['output_dir'], 'scaler.pkl')
-	output_path = config.get('prediction_output_path', os.path.join('./output/', 'result.csv'))
+	output_path = args.output
 	os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
 	setup_logging("bdc.predict", os.path.join(os.path.dirname(output_path) or '.', 'predict.log'))
 	logger = logging.getLogger("bdc.predict")
@@ -118,7 +154,8 @@ def main():
 		allow_train_fallback=True,
 		logger=logger,
 	)
-	latest_date = raw_df['日期'].max()
+	latest_date = resolve_as_of_date(raw_df, args.as_of_date)
+	raw_df = raw_df[raw_df['日期'] <= latest_date].copy()
 
 	stock_ids = sorted(raw_df['股票代码'].unique())
 	stockid2idx = {sid: idx for idx, sid in enumerate(stock_ids)}

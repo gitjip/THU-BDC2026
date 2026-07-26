@@ -20,6 +20,7 @@ wheels/
 *.tar
 
 # Generated training and prediction logs
+model/debug_*/
 model/*/train.log
 model/*/log/events.out.tfevents.*
 output/predict.log

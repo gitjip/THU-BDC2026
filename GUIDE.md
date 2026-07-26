@@ -26,7 +26,7 @@ uv sync
 
 ## 3. 训练
 
-运行：
+完整训练运行：
 
 ```bash
 sh train.sh
@@ -48,7 +48,23 @@ sh train.sh
 - `model/60_158+39/final_score.txt`
 - `model/60_158+39/train.log`
 
-当前 `code/src/config.py` 中 `num_epochs=1`，适合快速调试。想要正式训练更充分，可以把它调大，但要注意赛事训练时间限制。
+快速调试运行：
+
+```bash
+sh train.sh debug
+```
+
+debug 模式默认会：
+
+- 只使用最近 48 个训练目标交易日；
+- 验证集只取最近 5 个目标交易日；
+- 每个交易日固定抽样 120 只股票参与训练；
+- 保存到 `model/debug_60_158+39/`，不会覆盖正式模型；
+- 关闭 TensorBoard，减少调试时生成的文件。
+
+这样做是为了调试流程和代码错误，不是为了获得最佳成绩。完整训练仍使用 `sh train.sh`。
+
+上次训练变慢的主要原因：旧逻辑错误要求未来 5 天自然日连续，因此大量跨周末的正常样本被过滤，训练样本很少；修正为真实交易日后，训练样本从约每周 1 个变成每个交易日 1 个，CPU 上训练会明显变慢。debug 模式通过主动限量采样提速，而不是恢复错误的数据过滤。
 
 ## 4. 预测
 
@@ -64,6 +80,14 @@ sh test.sh
 output/result.csv
 ```
 
+如果要指定预测基准日：
+
+```bash
+sh test.sh --as-of-date 2026-07-15
+```
+
+如果指定日期是周末或节假日，代码会自动使用不晚于该日期的最近交易日。
+
 提交文件格式为：
 
 ```csv
@@ -75,11 +99,11 @@ stock_id,weight
 
 ## 5. 本地调试与自测
 
-如果只是确认训练和预测能跑通，直接执行：
+如果只是确认训练和预测能跑通，优先执行：
 
 ```bash
-sh train.sh
-sh test.sh
+sh train.sh debug
+sh test.sh debug --output /tmp/bdc_debug_result.csv
 ```
 
 如果想用项目已有 `stock_data.csv` 做一次本地后验评分，可以先按最后 5 个真实交易日生成本地 `train.csv` 和 `test.csv`：
@@ -105,8 +129,18 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `sequence_length`：每只股票输入过去多少个交易日，默认 60。
 - `label_horizon`：标签跨度，默认未来第 5 个交易日。
 - `val_days`：验证集目标交易日数量，默认 20。
+- `train_target_days`：训练目标交易日数量限制，默认 0 表示不限制；debug 默认 48。
+- `max_stocks_per_day`：每个交易日抽样股票数，默认 0 表示不抽样；debug 默认 120。
 - `num_epochs`：训练轮数，当前为 1。
 - `stock_data_file`：默认 `None`，自动寻找数据；也可以用环境变量 `BDC_STOCK_DATA_FILE` 临时覆盖。
+
+常用环境变量：
+
+```bash
+BDC_FAST_DEV=1 sh train.sh
+BDC_TRAIN_TARGET_DAYS=80 BDC_MAX_STOCKS_PER_DAY=180 sh train.sh debug
+BDC_PREDICT_DATE=2026-07-15 sh test.sh
+```
 
 ## 7. 注意事项
 
