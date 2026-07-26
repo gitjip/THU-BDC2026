@@ -310,6 +310,7 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
         "BDC_NUM_EPOCHS",
         "BDC_LEARNING_RATE",
         "BDC_WEIGHT_DECAY",
+        "BDC_DROPOUT",
         "BDC_LR_SCHEDULER",
         "BDC_LR_PATIENCE",
         "BDC_LR_FACTOR",

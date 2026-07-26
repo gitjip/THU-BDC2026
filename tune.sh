@@ -88,7 +88,7 @@ case "$profile" in
     set_default BDC_NUM_LAYERS 2
     set_default BDC_DIM_FEEDFORWARD 192
     set_default BDC_BATCH_SIZE 4
-    set_default BDC_NUM_EPOCHS 5
+    set_default BDC_NUM_EPOCHS 15
     set_default BDC_LEARNING_RATE 3e-5
     set_default BDC_WEIGHT_DECAY 1e-5
     set_default BDC_DROPOUT 0.1
@@ -97,7 +97,7 @@ case "$profile" in
     set_default BDC_LR_FACTOR 0.5
     set_default BDC_LR_THRESHOLD 1e-4
     set_default BDC_MIN_LR 1e-6
-    set_default BDC_EARLY_STOPPING_PATIENCE 2
+    set_default BDC_EARLY_STOPPING_PATIENCE 5
     set_default BDC_EARLY_STOPPING_MIN_DELTA 1e-4
     set_default BDC_GRAD_CLIP 1
     set_default BDC_NUM_PROCESSES 6
@@ -116,7 +116,7 @@ case "$profile" in
     set_default BDC_NUM_LAYERS 2
     set_default BDC_DIM_FEEDFORWARD 192
     set_default BDC_BATCH_SIZE 4
-    set_default BDC_NUM_EPOCHS 5
+    set_default BDC_NUM_EPOCHS 15
     set_default BDC_LEARNING_RATE 3e-5
     set_default BDC_WEIGHT_DECAY 1e-4
     set_default BDC_DROPOUT 0.2
@@ -125,7 +125,7 @@ case "$profile" in
     set_default BDC_LR_FACTOR 0.5
     set_default BDC_LR_THRESHOLD 1e-4
     set_default BDC_MIN_LR 1e-6
-    set_default BDC_EARLY_STOPPING_PATIENCE 2
+    set_default BDC_EARLY_STOPPING_PATIENCE 5
     set_default BDC_EARLY_STOPPING_MIN_DELTA 1e-4
     set_default BDC_GRAD_CLIP 1
     set_default BDC_NUM_PROCESSES 6
