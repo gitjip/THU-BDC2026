@@ -55,12 +55,35 @@ sh tune.sh quick --skip-final --resume
 | --- | --- | ---: | --- | ---: | ---: | ---: | --- | ---: |
 | `quick` | 平时调试 | 1 | 39 | 30 | 24 | 60 | d_model=64, layers=1 | 4 |
 | `balanced` | 常规调参 | 2 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 5 |
+| `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 5 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-四个档位都默认使用 `plateau` 学习率调度和早停。`quick`、`balanced` 的早停耐心值为 2，`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 和 `balanced` 会明显降低模型表现上限，但能更快暴露代码问题和大致方向。`large` 继承 `v1.1.5` 风格慢参数，用于复核候选方向，不适合每次调试都跑。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick`、`balanced`、`stable` 的早停耐心值为 2，`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 和 `balanced` 会明显降低模型表现上限，但能更快暴露代码问题和大致方向。`large` 继承 `v1.1.5` 风格慢参数，用于复核候选方向，不适合每次调试都跑。
 
-## 5. 正式调参运行
+`stable` 不是新架构，只是 `balanced` 的正则化对照：默认 3 个窗口、`dropout=0.2`、`weight_decay=1e-4`。如果它比同窗口 `balanced` 更稳，说明后续可以继续沿正则化方向调；如果没有改善，就不要继续在 dropout 上耗时间。
+
+## 5. 下一轮推荐对照
+
+`v1.2.1 large` 已经跑过 3 个窗口，但它和默认 2 窗口的 `balanced` 不完全可比。下一步先跑同样 3 个窗口的 `balanced`：
+
+```bash
+sh tune.sh v1.2.2 balanced --windows 3
+```
+
+再跑正则化对照：
+
+```bash
+sh tune.sh v1.2.3 stable
+```
+
+比较时优先看：
+
+- `summary.csv` 的多窗口均值、最差窗口和耗时；
+- `manifest.json` 里的窗口日期是否一致；
+- `training_history.csv` 中 train loss、eval loss、eval final_score 是否出现明显过拟合或平台。
+
+## 6. 正式调参运行
 
 默认跑 `balanced`，并在最后训练一次最终模型、生成最终预测：
 
@@ -100,7 +123,7 @@ sh tune.sh v1.2.0 --resume --create-tag
 
 `--create-tag` 要求工作区没有未提交改动，避免 tag 指向的代码和实际实验代码不一致。
 
-## 6. 产物位置
+## 7. 产物位置
 
 每个版本都有独立目录：
 
@@ -138,7 +161,7 @@ experiments/v1.2.0/
 - `windows/*/score.json`：每个窗口选中的股票、权重和真实收益；
 - `final/result.csv`：该版本最终预测文件。
 
-## 7. 注意事项
+## 8. 注意事项
 
 - 单个窗口分数波动很大，调参时优先看多个窗口平均值。
 - 窗口越多越稳，但训练次数越多，耗时近似按窗口数线性增加。
