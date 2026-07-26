@@ -176,6 +176,71 @@ def get_trading_dates(df: pd.DataFrame) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(sorted(dates))
 
 
+def parse_date(date_value: str | pd.Timestamp, name: str) -> pd.Timestamp:
+    date = pd.to_datetime(date_value, errors="coerce")
+    if pd.isna(date):
+        raise ValueError(f"{name} 日期格式无效: {date_value}")
+    return pd.Timestamp(date).normalize()
+
+
+def parse_holiday_dates(raw_holidays: str | list[str] | tuple[str, ...] | None) -> set[pd.Timestamp]:
+    if raw_holidays in (None, ""):
+        return set()
+    if isinstance(raw_holidays, str):
+        values = [item.strip() for item in raw_holidays.split(",") if item.strip()]
+    else:
+        values = [str(item).strip() for item in raw_holidays if str(item).strip()]
+    return {parse_date(value, "market_holidays") for value in values}
+
+
+def _is_future_business_day(date: pd.Timestamp, holidays: set[pd.Timestamp]) -> bool:
+    return date.weekday() < 5 and date not in holidays
+
+
+def is_trading_day(
+    date: pd.Timestamp,
+    known_trading_dates: pd.DatetimeIndex,
+    holidays: set[pd.Timestamp] | None = None,
+) -> bool:
+    holidays = holidays or set()
+    date = pd.Timestamp(date).normalize()
+    if len(known_trading_dates) > 0 and date <= pd.Timestamp(known_trading_dates[-1]):
+        return date in known_trading_dates
+    return _is_future_business_day(date, holidays)
+
+
+def next_trading_day(
+    start_date: pd.Timestamp,
+    known_trading_dates: pd.DatetimeIndex,
+    holidays: set[pd.Timestamp] | None = None,
+) -> pd.Timestamp:
+    holidays = holidays or set()
+    current = pd.Timestamp(start_date).normalize()
+    for _ in range(370):
+        if is_trading_day(current, known_trading_dates, holidays):
+            return current
+        current += pd.Timedelta(days=1)
+    raise ValueError(f"无法在 {start_date.date()} 之后找到合理交易日")
+
+
+def future_trading_window(
+    start_date: pd.Timestamp,
+    horizon: int,
+    known_trading_dates: pd.DatetimeIndex,
+    holidays: set[pd.Timestamp] | None = None,
+) -> pd.DatetimeIndex:
+    if horizon <= 0:
+        raise ValueError("prediction_horizon 必须大于 0")
+
+    days = []
+    current = pd.Timestamp(start_date).normalize()
+    while len(days) < horizon:
+        current = next_trading_day(current, known_trading_dates, holidays)
+        days.append(current)
+        current += pd.Timedelta(days=1)
+    return pd.DatetimeIndex(days)
+
+
 def split_by_last_trading_days(
     df: pd.DataFrame,
     test_days: int,

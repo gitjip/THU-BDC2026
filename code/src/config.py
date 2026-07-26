@@ -23,6 +23,9 @@ output_dir_prefix = 'debug_' if fast_dev_mode else ''
 config = {
     'sequence_length': sequence_length,   # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
     'label_horizon': 5,     # 标签为未来第5个交易日相对未来第1个交易日的收益
+    'prediction_horizon': 5,
+    'submission_deadline_date': os.environ.get('BDC_SUBMISSION_DATE', '2026-08-02'),
+    'market_holidays': os.environ.get('BDC_MARKET_HOLIDAYS', ''),
     'val_days': _env_int('BDC_VAL_DAYS', 5 if fast_dev_mode else 20),
     'train_target_days': _env_int('BDC_TRAIN_TARGET_DAYS', 48 if fast_dev_mode else 0),
     'max_stocks_per_day': _env_int('BDC_MAX_STOCKS_PER_DAY', 120 if fast_dev_mode else 0),

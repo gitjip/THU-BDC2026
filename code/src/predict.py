@@ -10,7 +10,14 @@ import torch
 from tqdm import tqdm
 
 from config import config
-from data_utils import load_stock_data, setup_logging
+from data_utils import (
+	future_trading_window,
+	get_trading_dates,
+	load_stock_data,
+	parse_date,
+	parse_holiday_dates,
+	setup_logging,
+)
 from model import StockTransformer
 from utils import engineer_features_39, engineer_features_158plus39
 
@@ -56,11 +63,26 @@ feature_engineer_func_map = {
 
 
 def parse_args():
-	parser = argparse.ArgumentParser(description='基于指定交易日生成 result.csv')
+	parser = argparse.ArgumentParser(description='基于提交截止日后的未来交易窗口生成 result.csv')
+	parser.add_argument(
+		'--submission-date',
+		default=os.environ.get('BDC_SUBMISSION_DATE', config.get('submission_deadline_date', '2026-08-02')),
+		help='提交截止日，默认 2026-08-02；预测窗口必须在该日期之后',
+	)
+	parser.add_argument(
+		'--target-start-date',
+		default=os.environ.get('BDC_TARGET_START_DATE'),
+		help='预测窗口候选起始日，默认 submission-date 后一天；若非交易日会向后跳到合理交易日',
+	)
 	parser.add_argument(
 		'--as-of-date',
-		default=os.environ.get('BDC_PREDICT_DATE'),
-		help='预测基准日T，默认使用数据中最新交易日；若当天无数据则使用不晚于该日期的最近交易日',
+		default=os.environ.get('BDC_AS_OF_DATE') or os.environ.get('BDC_PREDICT_DATE'),
+		help='仅用于本地调试的数据截止日；默认使用不晚于 submission-date 的最新数据',
+	)
+	parser.add_argument(
+		'--market-holidays',
+		default=os.environ.get('BDC_MARKET_HOLIDAYS', config.get('market_holidays', '')),
+		help='未来休市日，逗号分隔，例如 2026-10-01,2026-10-02',
 	)
 	parser.add_argument(
 		'--output',
@@ -114,23 +136,63 @@ def build_inference_sequences(data, features, sequence_length, stock_ids, latest
 	return np.asarray(sequences, dtype=np.float32), sequence_stock_ids
 
 
-def resolve_as_of_date(raw_df, requested_date):
+def resolve_data_cutoff_date(raw_df, cutoff_date):
 	available_dates = pd.DatetimeIndex(sorted(raw_df['日期'].unique()))
-	if requested_date is None:
-		return pd.Timestamp(available_dates[-1])
+	cutoff = pd.Timestamp(cutoff_date).normalize()
 
-	requested = pd.to_datetime(requested_date, errors='coerce')
-	if pd.isna(requested):
-		raise ValueError(f'无法解析 --as-of-date: {requested_date}')
-	requested = requested.normalize()
-	candidates = available_dates[available_dates <= requested]
+	candidates = available_dates[available_dates <= cutoff]
 	if len(candidates) == 0:
-		raise ValueError(f'数据中没有不晚于 {requested.date()} 的交易日')
+		raise ValueError(f'数据中没有不晚于 {cutoff.date()} 的交易日')
 
 	as_of_date = pd.Timestamp(candidates[-1])
-	if as_of_date != requested:
-		logger.info("指定日期 %s 无数据，改用最近交易日 %s", requested.date(), as_of_date.date())
+	if as_of_date != cutoff:
+		logger.info("数据截止候选日 %s 无数据，改用最近已知交易日 %s", cutoff.date(), as_of_date.date())
 	return as_of_date
+
+
+def resolve_prediction_task(raw_df, args):
+	submission_date = parse_date(args.submission_date, "--submission-date")
+	as_of_cutoff = parse_date(args.as_of_date, "--as-of-date") if args.as_of_date else submission_date
+	if as_of_cutoff > submission_date:
+		raise ValueError(
+			f"--as-of-date 不能晚于提交截止日: {as_of_cutoff.date()} > {submission_date.date()}"
+		)
+
+	target_start_candidate = (
+		parse_date(args.target_start_date, "--target-start-date")
+		if args.target_start_date
+		else submission_date + pd.Timedelta(days=1)
+	)
+	if target_start_candidate <= submission_date:
+		raise ValueError(
+			f"预测窗口起始日必须晚于提交截止日: {target_start_candidate.date()} <= {submission_date.date()}"
+		)
+
+	known_dates = get_trading_dates(raw_df)
+	holidays = parse_holiday_dates(args.market_holidays)
+	target_window = future_trading_window(
+		target_start_candidate,
+		config.get('prediction_horizon', 5),
+		known_dates,
+		holidays,
+	)
+	if target_window[0] != target_start_candidate:
+		logger.info("预测窗口候选起始日 %s 非交易日，改用 %s", target_start_candidate.date(), target_window[0].date())
+
+	as_of_date = resolve_data_cutoff_date(raw_df, as_of_cutoff)
+	if as_of_date >= target_window[0]:
+		raise ValueError(
+			f"数据截止日必须早于预测窗口首日，避免未来信息泄漏: {as_of_date.date()} >= {target_window[0].date()}"
+		)
+
+	if as_of_date < submission_date:
+		logger.info(
+			"当前 stock_data 最新可用日早于提交截止日: as_of=%s, submission=%s；正式提交前应更新数据",
+			as_of_date.date(),
+			submission_date.date(),
+		)
+
+	return submission_date, as_of_date, target_window
 
 
 def main():
@@ -154,12 +216,20 @@ def main():
 		allow_train_fallback=True,
 		logger=logger,
 	)
-	latest_date = resolve_as_of_date(raw_df, args.as_of_date)
+	submission_date, latest_date, target_window = resolve_prediction_task(raw_df, args)
 	raw_df = raw_df[raw_df['日期'] <= latest_date].copy()
 
 	stock_ids = sorted(raw_df['股票代码'].unique())
 	stockid2idx = {sid: idx for idx, sid in enumerate(stock_ids)}
-	logger.info("预测基准日: %s | 股票映射数量=%s", latest_date.date(), len(stockid2idx))
+	logger.info(
+		"预测任务: 提交截止日=%s | 数据截止日=%s | 目标窗口=%s ~ %s | 目标交易日=%s",
+		submission_date.date(),
+		latest_date.date(),
+		target_window[0].date(),
+		target_window[-1].date(),
+		", ".join(day.strftime('%Y-%m-%d') for day in target_window),
+	)
+	logger.info("股票映射数量: %s", len(stockid2idx))
 
 	processed, features = preprocess_predict_data(raw_df, stockid2idx)
 	processed[features] = processed[features].replace([np.inf, -np.inf], np.nan).fillna(0.0)

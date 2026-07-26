@@ -74,19 +74,30 @@ debug 模式默认会：
 sh test.sh
 ```
 
-预测会读取同一个数据源，使用最新一个交易日作为预测基准日，输出：
+正式预测只负责生成提交用的 `result.csv`，不负责验证模型好坏。因为提交日之后的未来 5 个交易日还没有真实收益，不能打分，只能等线上评测或之后数据更新后再回看。
+
+当前默认提交截止日是 `2026-08-02`，这是周日。代码会从提交截止日之后开始找第一个合理交易日，所以默认预测窗口是：
+
+```text
+2026-08-03, 2026-08-04, 2026-08-05, 2026-08-06, 2026-08-07
+```
+
+预测会读取不晚于提交截止日的最新可用历史数据，输出：
 
 ```text
 output/result.csv
 ```
 
-如果要指定预测基准日：
+如果要指定提交截止日或预测窗口候选起始日：
 
 ```bash
-sh test.sh --as-of-date 2026-07-15
+sh test.sh --submission-date 2026-08-02
+sh test.sh --target-start-date 2026-08-08
 ```
 
-如果指定日期是周末或节假日，代码会自动使用不晚于该日期的最近交易日。
+如果预测窗口候选起始日是周末、节假日或历史数据中没有交易记录，代码会一直向后跳到合理交易日。未来休市日可用 `BDC_MARKET_HOLIDAYS` 或 `--market-holidays` 指定。
+
+`--as-of-date` 只用于本地调试，表示最多使用哪一天之前的历史数据；它不能晚于提交截止日。
 
 提交文件格式为：
 
@@ -105,6 +116,13 @@ stock_id,weight
 sh train.sh debug
 sh test.sh debug --output /tmp/bdc_debug_result.csv
 ```
+
+本地验证和正式预测要分开理解：
+
+- 验证：只在历史数据中做模拟，例如用较早数据训练，用后面 5 个已发生交易日计算分数。它用于平时判断模型方向是否变好。
+- 预测：面对提交日之后还没发生的未来 5 个交易日，只能输出 `result.csv`，没有真实标签可算分。
+
+以后可以在验证部分实现 walk-forward：例如滚动选择多个历史提交日，每次只用该日之前的数据训练/预测，再用之后 5 个交易日打分，最后看平均表现。
 
 如果想用项目已有 `stock_data.csv` 做一次本地后验评分，可以先按最后 5 个真实交易日生成本地 `train.csv` 和 `test.csv`：
 
@@ -139,11 +157,14 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 ```bash
 BDC_FAST_DEV=1 sh train.sh
 BDC_TRAIN_TARGET_DAYS=80 BDC_MAX_STOCKS_PER_DAY=180 sh train.sh debug
-BDC_PREDICT_DATE=2026-07-15 sh test.sh
+BDC_SUBMISSION_DATE=2026-08-02 sh test.sh
+BDC_TARGET_START_DATE=2026-08-08 sh test.sh
+BDC_MARKET_HOLIDAYS=2026-08-03 sh test.sh
 ```
 
 ## 7. 注意事项
 
 - 正式提交结果必须由模型训练和预测产生，不能硬编码股票代码。
+- 验证分数只能来自历史窗口模拟，不能拿正式预测窗口提前校验模型好坏。
 - `data/`、`output/`、`temp/` 在最终验证中可能被挂载覆盖，不要把不可替代的自有数据放在这些目录。
 - 如果出现 `TA-Lib` 安装问题，先确认系统层面的 `ta-lib` 库已安装，再安装 Python 依赖。
