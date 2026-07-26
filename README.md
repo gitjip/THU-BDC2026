@@ -15,9 +15,9 @@
 1. 读取历史行情数据（`data/stock_data.csv`）；
 2. 做特征工程（39特征或`158+39`特征）；
 3. 构建标签：未来收益率（代码中为 `open_t1` 到 `open_t5` 的相对收益）；
-4. 按“日期”组织排序样本：每个样本是一日内多只股票的序列与目标；
+4. 按真实交易日组织排序样本：每个样本是一日内多只股票的序列与目标；
 5. 训练排序模型，监控 `final_score` 并保存最优权重；
-6. 使用训练好的 `best_model.pth` + `scaler.pkl` 在最新日期上生成Top5选股结果。
+6. 使用训练好的 `best_model.pth` + `scaler.pkl` 在最新交易日上生成Top5选股结果。
 
 ---
 
@@ -55,7 +55,7 @@
 训练主脚本，关键内容：
 - 数据预处理：
 	- `_preprocess_common()`：按股票分组并行特征工程、股票ID映射、标签构建；
-	- `split_train_val_by_last_month()`：按最后阶段数据切分训练/验证集，并保留序列上下文。
+	- `split_train_val_by_recent_trading_days()`：按最近真实交易日切分训练/验证集，并保留序列上下文。
 - 数据集组织：
 	- `RankingDataset` + `collate_fn`：处理每日股票数量不一致问题（padding + mask）。
 - 损失函数：`WeightedRankingLoss`
@@ -78,7 +78,7 @@
 2. 执行与训练一致的特征工程；
 3. 加载 `scaler.pkl` 进行特征标准化；
 4. 用 `best_model.pth` 对全部可预测股票打分；
-5. 按分数降序取前5只，输出到 `output.csv`：
+5. 按分数降序取前5只，输出到 `output/result.csv`：
 	 - `stock_id`
 	 - `weight`（固定 `0.2`）
 
@@ -92,7 +92,8 @@
 ## 3. 数据与输入输出约定
 
 默认训练数据文件：
-- `data/train.csv`
+- `data/stock_data.csv` 或赛事方挂载的 `data/stock_data`
+- `data/train.csv` 仅作为本地调试兜底
 
 关键列：
 - `股票代码`、`日期`、`开盘`、`收盘`、`最高`、`最低`、`成交量`、`成交额`、`换手率`、`涨跌幅` 等。

@@ -1,5 +1,6 @@
 import os
 import multiprocessing as mp
+import logging
 
 import joblib
 import numpy as np
@@ -8,8 +9,11 @@ import torch
 from tqdm import tqdm
 
 from config import config
+from data_utils import load_stock_data, setup_logging
 from model import StockTransformer
 from utils import engineer_features_39, engineer_features_158plus39
+
+logger = logging.getLogger(__name__)
 
 
 feature_cloums_map = {
@@ -51,7 +55,8 @@ feature_engineer_func_map = {
 
 
 def preprocess_predict_data(df, stockid2idx):
-	assert config['feature_num'] in feature_engineer_func_map, f"Unsupported feature_num: {config['feature_num']}"
+	if config['feature_num'] not in feature_engineer_func_map:
+		raise ValueError(f"Unsupported feature_num: {config['feature_num']}")
 	feature_engineer = feature_engineer_func_map[config['feature_num']]
 	feature_columns = feature_cloums_map[config['feature_num']]
 
@@ -61,8 +66,8 @@ def preprocess_predict_data(df, stockid2idx):
 	if len(groups) == 0:
 		raise ValueError('输入数据为空，无法预测')
 
-	num_processes = min(10, mp.cpu_count())
-	print('cpus!!!!!!!!!!!!!!!!!!',mp.cpu_count())
+	num_processes = min(config.get('num_processes', 10), mp.cpu_count(), len(groups))
+	logger.info("开始预测集特征工程: 股票数=%s, 进程数=%s", len(groups), num_processes)
 	with mp.Pool(processes=num_processes) as pool:
 		processed_list = list(tqdm(pool.imap(feature_engineer, groups), total=len(groups), desc='预测集特征工程'))
 
@@ -94,23 +99,30 @@ def build_inference_sequences(data, features, sequence_length, stock_ids, latest
 
 
 def main():
-	data_file = os.path.join(config['data_path'], 'train.csv')
+	global logger
 	model_path = os.path.join(config['output_dir'], 'best_model.pth')
 	scaler_path = os.path.join(config['output_dir'], 'scaler.pkl')
-	output_path = os.path.join('./output/', 'result.csv')
+	output_path = config.get('prediction_output_path', os.path.join('./output/', 'result.csv'))
+	os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+	setup_logging("bdc.predict", os.path.join(os.path.dirname(output_path) or '.', 'predict.log'))
+	logger = logging.getLogger("bdc.predict")
 
 	if not os.path.exists(model_path):
 		raise FileNotFoundError(f'未找到模型文件: {model_path}')
 	if not os.path.exists(scaler_path):
 		raise FileNotFoundError(f'未找到Scaler文件: {scaler_path}')
 
-	raw_df = pd.read_csv(data_file, dtype={'股票代码': str})
-	raw_df['股票代码'] = raw_df['股票代码'].astype(str).str.zfill(6)
-	raw_df['日期'] = pd.to_datetime(raw_df['日期'])
+	raw_df, data_file = load_stock_data(
+		config['data_path'],
+		data_file=config.get('stock_data_file'),
+		allow_train_fallback=True,
+		logger=logger,
+	)
 	latest_date = raw_df['日期'].max()
 
 	stock_ids = sorted(raw_df['股票代码'].unique())
 	stockid2idx = {sid: idx for idx, sid in enumerate(stock_ids)}
+	logger.info("预测基准日: %s | 股票映射数量=%s", latest_date.date(), len(stockid2idx))
 
 	processed, features = preprocess_predict_data(raw_df, stockid2idx)
 	processed[features] = processed[features].replace([np.inf, -np.inf], np.nan).fillna(0.0)
@@ -133,9 +145,11 @@ def main():
 		device = torch.device('mps')
 	else:
 		device = torch.device('cpu')
+	logger.info("预测设备: %s", device)
 
 	model = StockTransformer(input_dim=len(features), config=config, num_stocks=len(stock_ids))
-	model.load_state_dict(torch.load(model_path, map_location=device))
+	state_dict = torch.load(model_path, map_location=device, weights_only=True)
+	model.load_state_dict(state_dict)
 	model.to(device)
 	model.eval()
 
@@ -156,9 +170,9 @@ def main():
 	})
 	output_df.to_csv(output_path, index=False)
 
-	print(f'预测日期: {latest_date.date()}')
-	print(f'参与排序股票数: {len(ranked_stock_ids)}')
-	print(f'结果已写入: {output_path}')
+	logger.info("参与排序股票数: %s", len(ranked_stock_ids))
+	logger.info("Top5: %s", ", ".join(top5))
+	logger.info("结果已写入: %s", output_path)
 
 
 if __name__ == '__main__':

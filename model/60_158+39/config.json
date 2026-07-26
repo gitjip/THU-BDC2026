@@ -1,18 +1,24 @@
 {
     "sequence_length": 60,
+    "label_horizon": 5,
+    "val_days": 20,
     "d_model": 256,
     "nhead": 4,
     "num_layers": 3,
     "dim_feedforward": 512,
     "batch_size": 4,
-    "num_epochs": 5,
+    "num_epochs": 1,
     "learning_rate": 1e-05,
     "dropout": 0.1,
     "feature_num": "158+39",
     "max_grad_norm": 5.0,
+    "seed": 42,
+    "num_processes": 10,
     "pairwise_weight": 1,
     "base_weight": 1.0,
     "top5_weight": 2.0,
     "output_dir": "./model/60_158+39",
-    "data_path": "./data"
+    "data_path": "./data",
+    "stock_data_file": null,
+    "prediction_output_path": "./output/result.csv"
 }

@@ -3,6 +3,7 @@ import subprocess
 import docker
 import time
 import os
+import sys
 DATA_ROOT_PATH = "./"
 
 
@@ -94,8 +95,8 @@ def run_docker_compose_up(tar_name):
 # 运行score.sh命令
 def run_score(file_name):
     team_name = file_name.split("/")[-1].split(".")[0]  # 获取文件名作为team_name
-    command = f"python test/score_docker.py {team_name}"
-    subprocess.run(command, shell=True, check=True)
+    command = [sys.executable, "test/score_docker.py", team_name]
+    subprocess.run(command, check=True)
     print("Started score_docker.py")
 
     # 读取1.csv的第一行数据

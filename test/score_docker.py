@@ -38,20 +38,17 @@ def is_valid_prediction(prediction_data):
         raise ValueError(f"预测结果不合法：权重之和必须为0到1之间. 当前权重之和为 {weight_sum}.")
 
 
-def calculate_return(group):
-    start = group.iloc[0]
-    end = group.iloc[-1]
-    return (end['开盘'] - start['开盘']) / start['开盘']
-
-
 def calculate_predict_weight_score(output_data, test_data):
     # 选择输出指定的5个股票
     test_data = test_data[test_data['股票代码'].isin(output_data['股票代码'])]
     # 只选最后五个记录
-    test_data = test_data.groupby('股票代码').tail(5)
+    test_data = test_data.sort_values(['股票代码', '日期']).groupby('股票代码', group_keys=False).tail(5)
     # 分别计算收益率
-    group = test_data.groupby('股票代码')
-    result = group.apply(calculate_return).reset_index().rename(columns={0: '收益率'})
+    result = test_data.groupby('股票代码', as_index=False).agg(
+        start_open=('开盘', 'first'),
+        end_open=('开盘', 'last'),
+    )
+    result['收益率'] = (result['end_open'] - result['start_open']) / result['start_open']
     result = result.merge(output_data, on='股票代码')
     # 计算加权收益率
     final_score = (result['收益率'] * result['权重']).sum()
@@ -60,8 +57,8 @@ def calculate_predict_weight_score(output_data, test_data):
 
 # 读取测试数据
 try:
-    test_data = pd.read_csv(test_data_path)
-    raw_output_data = pd.read_csv(output_path)
+    test_data = pd.read_csv(test_data_path, dtype={'股票代码': str})
+    raw_output_data = pd.read_csv(output_path, dtype={'stock_id': str, '股票代码': str})
     is_valid_prediction(raw_output_data)
 except Exception as e:
     print(f"Error reading test data or validating prediction: {e}")
@@ -69,8 +66,11 @@ except Exception as e:
     sys.exit(0)
 
 test_data = test_data[['股票代码', '日期', '开盘', '收盘']]
+test_data['股票代码'] = test_data['股票代码'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(6)
 # 读取输出数据
 output_data = raw_output_data.rename(columns={'stock_id': '股票代码', 'weight': '权重'})
+output_data['股票代码'] = output_data['股票代码'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(6)
+output_data['权重'] = pd.to_numeric(output_data['权重'], errors='coerce')
 
 required_columns = {'股票代码', '权重'}
 if not required_columns.issubset(output_data.columns):

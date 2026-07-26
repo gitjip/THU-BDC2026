@@ -16,6 +16,10 @@ import os
 import json
 import multiprocessing as mp
 import random
+import logging
+from data_utils import load_stock_data, setup_logging, split_train_val_by_trading_days
+
+logger = logging.getLogger(__name__)
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -39,23 +43,25 @@ feature_engineer_func_map = {
 
 def _build_label_and_clean(processed, drop_small_open=True):
     """统一构建标签并清洗无效样本。"""
+    processed = processed.copy()
     processed['open_t1'] = processed.groupby('股票代码')['开盘'].shift(-1)
-    processed['open_t5'] = processed.groupby('股票代码')['开盘'].shift(-5)
+    processed['open_t5'] = processed.groupby('股票代码')['开盘'].shift(-config.get('label_horizon', 5))
 
     # 过滤无效开盘价，避免收益率极端爆炸
     if drop_small_open:
-        processed = processed[processed['open_t1'] > 1e-4]
+        processed = processed.loc[processed['open_t1'] > 1e-4].copy()
 
     processed['label'] = (processed['open_t5'] - processed['open_t1']) / (processed['open_t1'] + 1e-12)
-    processed = processed.dropna(subset=['label'])
+    processed = processed.dropna(subset=['label']).copy()
 
-    processed.drop(columns=['open_t1', 'open_t5'], inplace=True)
-    return processed
+    return processed.drop(columns=['open_t1', 'open_t5'])
 
 
 def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
-    assert config['feature_num'] in feature_engineer_func_map, f"Unsupported feature_num: {config['feature_num']}"
-    assert stockid2idx is not None, "stockid2idx 不能为空"
+    if config['feature_num'] not in feature_engineer_func_map:
+        raise ValueError(f"Unsupported feature_num: {config['feature_num']}")
+    if stockid2idx is None:
+        raise ValueError("stockid2idx 不能为空")
     feature_engineer = feature_engineer_func_map[config['feature_num']]
     feature_columns = feature_cloums_map[config['feature_num']]
 
@@ -63,12 +69,12 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
     df = df.copy()
     df = df.sort_values(['股票代码', '日期']).reset_index(drop=True)
 
-    print(f"正在使用多进程进行{desc}...")
     groups = [group for _, group in df.groupby('股票代码', sort=False)]
     if len(groups) == 0:
         raise ValueError(f"{desc}输入为空，无法继续")
 
-    num_processes = min(10, mp.cpu_count())
+    num_processes = min(config.get('num_processes', 10), mp.cpu_count(), len(groups))
+    logger.info("开始%s: 股票数=%s, 进程数=%s", desc, len(groups), num_processes)
     with mp.Pool(processes=num_processes) as pool:
         processed_list = list(tqdm(pool.imap(feature_engineer, groups), total=len(groups), desc=desc))
 
@@ -519,42 +525,30 @@ def save_predictions(top_stocks, output_path):
     print(f"预测结果已保存到: {output_path}")
 
 
-def split_train_val_by_last_month(df, sequence_length):
-    """按最后一个月做验证集划分，并为验证集补充序列上下文。"""
-    df = df.copy()
-    df['日期'] = pd.to_datetime(df['日期'])
-    df = df.sort_values(['日期', '股票代码']).reset_index(drop=True)
-
-    last_date = df['日期'].max()
-    val_start = (last_date - pd.DateOffset(months=2)).normalize()
-
-    # 验证集需要保留前 sequence_length-1 个交易日作为序列上下文，
-    # 这样第一个验证样本的窗口结束日就可以落在 val_start。
-    val_context_start = val_start - pd.tseries.offsets.BDay(sequence_length - 1)
-
-    train_df = df[df['日期'] < val_start].copy()
-    val_df = df[df['日期'] >= val_context_start].copy()
-
-    print(f"全量数据范围: {df['日期'].min().date()} 到 {last_date.date()}")
-    print(f"训练集范围: {train_df['日期'].min().date()} 到 {train_df['日期'].max().date()}")
-    print(f"验证集目标范围(最后一个月): {val_start.date()} 到 {last_date.date()}")
-    print(f"验证集实际取数范围(含序列上下文): {val_df['日期'].min().date()} 到 {val_df['日期'].max().date()}")
-
-    # 恢复为字符串，保持与原流程一致
-    train_df['日期'] = train_df['日期'].dt.strftime('%Y-%m-%d')
-    val_df['日期'] = val_df['日期'].dt.strftime('%Y-%m-%d')
-
-    return train_df, val_df, val_start
+def split_train_val_by_recent_trading_days(df, sequence_length):
+    """按真实交易日划分验证集，并为验证集补足历史窗口上下文。"""
+    return split_train_val_by_trading_days(
+        df=df,
+        sequence_length=sequence_length,
+        val_days=config.get('val_days', 20),
+        label_horizon=config.get('label_horizon', 5),
+        logger=logger,
+    )
 
 # 主程序
 def main():
+    global logger
     set_seed(config.get('seed', 42))
     output_dir = config['output_dir']
     os.makedirs(output_dir,exist_ok=True)
+    setup_logging("bdc.train", os.path.join(output_dir, 'train.log'))
+    logger = logging.getLogger("bdc.train")
+
     # 保存在output_dir中保存当前的配置文件，以便复现
     data_path = config['data_path']
     with open(os.path.join(output_dir, 'config.json'), 'w') as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
+        f.write('\n')
     is_train = True
     writer = SummaryWriter(log_dir=os.path.join(output_dir, 'log')) if is_train else None
     if torch.cuda.is_available():
@@ -563,20 +557,31 @@ def main():
         device = torch.device('mps')
     else:
         device = torch.device('cpu')
+    logger.info("训练设备: %s", device)
+    logger.info("随机种子: %s", config.get('seed', 42))
     
     # 1. 数据加载
-    data_file = os.path.join(data_path, 'train.csv')
-    full_df = pd.read_csv(data_file)
-    train_df, val_df, val_start = split_train_val_by_last_month(full_df, config['sequence_length'])
+    full_df, data_file = load_stock_data(
+        data_path,
+        data_file=config.get('stock_data_file'),
+        allow_train_fallback=True,
+        logger=logger,
+    )
+    train_df, val_df, val_start, _ = split_train_val_by_recent_trading_days(
+        full_df,
+        config['sequence_length'],
+    )
     
     # 获取所有股票ID，建立映射
     all_stock_ids = full_df['股票代码'].unique()
     stockid2idx = {sid: idx for idx, sid in enumerate(sorted(all_stock_ids))}
     num_stocks = len(stockid2idx)
+    logger.info("股票映射数量: %s", num_stocks)
     
     # 2. 特征工程与预处理
     train_data, features = preprocess_data(train_df, is_train=True, stockid2idx=stockid2idx)
     val_data, _ = preprocess_val_data(val_df, stockid2idx=stockid2idx)
+    logger.info("特征数量: %s", len(features))
     
     # 3. 标准化
     scaler = StandardScaler()
@@ -586,10 +591,13 @@ def main():
     # 丢弃nan数据
     train_data = train_data.dropna(subset=features)
     val_data = val_data.dropna(subset=features)
+    if train_data.empty or val_data.empty:
+        raise ValueError("特征清洗后训练集或验证集为空")
     # 然后再缩放
     train_data[features] = scaler.fit_transform(train_data[features])
     val_data[features] = scaler.transform(val_data[features])
     joblib.dump(scaler, os.path.join(output_dir, 'scaler.pkl'))
+    logger.info("Scaler 已保存: %s", os.path.join(output_dir, 'scaler.pkl'))
 
     
     # 4. 创建排序数据集
@@ -607,8 +615,10 @@ def main():
         min_window_end_date=val_start.strftime('%Y-%m-%d')
     )
 
-    print(f"训练集样本数: {len(train_sequences)}")
-    print(f"验证集样本数: {len(val_sequences)}")
+    logger.info("训练集样本数: %s", len(train_sequences))
+    logger.info("验证集样本数: %s", len(val_sequences))
+    if len(train_sequences) == 0 or len(val_sequences) == 0:
+        raise ValueError("训练集或验证集排序样本为空，请检查数据时间范围和 sequence_length")
     
     # 5. 创建排序数据集和数据加载器
     train_dataset = RankingDataset(train_sequences, train_targets, train_relevance, train_stock_indices)
@@ -635,7 +645,7 @@ def main():
     # 6. 模型初始化
     model = StockTransformer(input_dim=len(features), config=config, num_stocks=num_stocks)
     model.to(device)
-    print(f"模型参数量: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+    logger.info("模型参数量: %s", sum(p.numel() for p in model.parameters() if p.requires_grad))
     
     # 7. 损失函数和优化器
     criterion = WeightedRankingLoss(
@@ -654,25 +664,25 @@ def main():
         best_epoch = -1
         
         for epoch in range(config['num_epochs']):
-            print(f"\n=== Epoch {epoch+1}/{config['num_epochs']} ===")
+            logger.info("=== Epoch %s/%s ===", epoch + 1, config['num_epochs'])
             
             # 训练
             train_loss, train_metrics = train_ranking_model(
                 model, train_loader, criterion, optimizer, device, epoch, writer
             )
             
-            print(f"Train Loss: {train_loss:.4f}")
+            logger.info("Train Loss: %.4f", train_loss)
             for k, v in train_metrics.items():
-                print(f"Train {k}: {v:.4f}")
+                logger.info("Train %s: %.4f", k, v)
             
             # 验证
             eval_loss, eval_metrics = evaluate_ranking_model(
                 model, val_loader, criterion, device, writer, epoch
             )
             
-            print(f"Eval Loss: {eval_loss:.4f}")
+            logger.info("Eval Loss: %.4f", eval_loss)
             for k, v in eval_metrics.items():
-                print(f"Eval {k}: {v:.4f}")
+                logger.info("Eval %s: %.4f", k, v)
             
             # 学习率调度
             scheduler.step()
@@ -686,8 +696,8 @@ def main():
                 best_score = current_final_score
                 best_epoch = epoch + 1
                 torch.save(model.state_dict(), os.path.join(output_dir, 'best_model.pth'))
-                print(f"保存最佳模型 - final score: {best_score:.4f}")
-        print(f"\n训练完成！最佳 epoch: {best_epoch}, 最佳 final score: {best_score:.4f}")
+                logger.info("保存最佳模型: %s | final_score=%.4f", os.path.join(output_dir, 'best_model.pth'), best_score)
+        logger.info("训练完成: 最佳 epoch=%s, 最佳 final_score=%.4f", best_epoch, best_score)
         with open(os.path.join(output_dir, 'final_score.txt'), 'w') as f:
             f.write(f"Best epoch: {best_epoch}\nBest final_score: {best_score:.6f}\n")
 
@@ -700,4 +710,4 @@ if __name__ == "__main__":
     # 多进程保护
     mp.set_start_method('spawn', force=True)
     best_score = main()
-    print(f"\n########## 训练完成！最佳 final score: {best_score:.4f} ##########")
+    logger.info("########## 训练完成！最佳 final score: %.4f ##########", best_score)
