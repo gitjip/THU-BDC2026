@@ -24,3 +24,4 @@ model/debug_*/
 model/*/train.log
 model/*/log/events.out.tfevents.*
 output/predict.log
+temp/latest_score.csv

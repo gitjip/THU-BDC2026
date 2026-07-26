@@ -39,5 +39,5 @@ COPY . .
 ENV PATH="/app/.venv/bin:$PATH"
 ENV LD_LIBRARY_PATH="/usr/lib:/usr/local/lib"
 
-# Keep container running idle; execute train/predict manually via docker exec.
+# Default command for a manually started container; local docker-compose overrides it.
 CMD ["sleep", "infinity"]

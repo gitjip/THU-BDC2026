@@ -138,7 +138,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 .venv/bin/python test/score_self.py
 ```
 
-本地评分只用于调试参考，不等于线上最终成绩。
+本地评分结果会写入 `temp/latest_score.csv`。它只是最近一次本地评分缓存，已加入 Git 忽略，不是比赛提交文件；比赛提交文件仍是 `output/result.csv`。
 
 ## 6. 常用配置
 

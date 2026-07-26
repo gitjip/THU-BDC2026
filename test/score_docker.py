@@ -1,24 +1,29 @@
 """
 本脚本用于将预测出的五支股票与实际的股票数据进行对比，计算加权收益，形成最终得分。
 """
-import pandas as pd
 import argparse
+from pathlib import Path
 import sys
+
+import pandas as pd
+
 parser = argparse.ArgumentParser(description='Calculate stock prediction score.')
 parser.add_argument('team_name', type=str, help='The name of the team (used for file naming).')
 args = parser.parse_args()
-output_path = f'./test/results_output/{args.team_name}.csv'
-test_data_path = './data/test.csv'
+OUTPUT_PATH = Path("./test/results_output") / f"{args.team_name}.csv"
+TEST_DATA_PATH = Path("./data/test.csv")
+TEMP_SCORE_PATH = Path("./temp/latest_score.csv")
 
 
 def write_failed_score() -> None:
+    TEMP_SCORE_PATH.parent.mkdir(parents=True, exist_ok=True)
     result = pd.DataFrame(
         {
             "Team Name": [args.team_name],
             "Final Score": [-999],
         }
     )
-    result.to_csv("./temp/tmp.csv", index=False)
+    result.to_csv(TEMP_SCORE_PATH, index=False)
 
 
 def is_valid_prediction(prediction_data):
@@ -38,7 +43,7 @@ def is_valid_prediction(prediction_data):
         raise ValueError(f"预测结果不合法：权重之和必须为0到1之间. 当前权重之和为 {weight_sum}.")
 
 
-def calculate_predict_weight_score(output_data, test_data):
+def calculate_portfolio_return_score(output_data, test_data):
     # 选择输出指定的5个股票
     test_data = test_data[test_data['股票代码'].isin(output_data['股票代码'])]
     # 只选最后五个记录
@@ -55,13 +60,12 @@ def calculate_predict_weight_score(output_data, test_data):
     return final_score
 
 
-# 读取测试数据
 try:
-    test_data = pd.read_csv(test_data_path, dtype={'股票代码': str})
-    raw_output_data = pd.read_csv(output_path, dtype={'stock_id': str, '股票代码': str})
+    test_data = pd.read_csv(TEST_DATA_PATH, dtype={'股票代码': str})
+    raw_output_data = pd.read_csv(OUTPUT_PATH, dtype={'stock_id': str, '股票代码': str})
     is_valid_prediction(raw_output_data)
 except Exception as e:
-    print(f"Error reading test data or validating prediction: {e}")
+    print(f"读取本地测试数据或验证预测结果失败: {e}")
     write_failed_score()
     sys.exit(0)
 
@@ -74,20 +78,20 @@ output_data['权重'] = pd.to_numeric(output_data['权重'], errors='coerce')
 
 required_columns = {'股票代码', '权重'}
 if not required_columns.issubset(output_data.columns):
-    print('Error reading test data or validating prediction: 输出结果缺少股票代码或权重字段。')
+    print('读取本地测试数据或验证预测结果失败: 输出结果缺少股票代码或权重字段。')
     write_failed_score()
     sys.exit(0)
 
-# 第一步：计算预测股票的加权收益率
-predict_weight_score = calculate_predict_weight_score(output_data, test_data)
+portfolio_return_score = calculate_portfolio_return_score(output_data, test_data)
 
 
-# 保存结果到 CSV 文件
+TEMP_SCORE_PATH.parent.mkdir(parents=True, exist_ok=True)
 result = pd.DataFrame(
     {
         "Team Name": [args.team_name],
-        "Final Score": [predict_weight_score],
+        "Final Score": [portfolio_return_score],
     }
 )
-result.to_csv("./temp/tmp.csv", index=False)
-print(f"预测股票的加权收益率得分: {predict_weight_score}")
+result.to_csv(TEMP_SCORE_PATH, index=False)
+print(f"预测股票的加权收益率得分: {portfolio_return_score}")
+print(f"本地评分结果已写入: {TEMP_SCORE_PATH}")

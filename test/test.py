@@ -5,6 +5,7 @@ import time
 import os
 import sys
 DATA_ROOT_PATH = "./"
+TEMP_SCORE_PATH = "./temp/latest_score.csv"
 
 
 def get_docker_client():
@@ -27,12 +28,9 @@ def get_docker_client():
 
 
 def delete_file():
-    # 使用del删除文件
     command = f"rm -rf {DATA_ROOT_PATH}/test/output/*"
     subprocess.run(command, shell=True, check=True)
     command = f"rm -rf {DATA_ROOT_PATH}/temp/*"
-    subprocess.run(command, shell=True, check=True)
-    command = f"rm -rf {DATA_ROOT_PATH}/temp/tmp.csv"
     subprocess.run(command, shell=True, check=True)
 
 
@@ -40,11 +38,10 @@ def delete_file():
 def run_docker_rm():
     # command = "docker stop $(docker ps -aq)"
     # subprocess.run(command, shell=True, check=True)
-    # print("Removed project-app-1 container.")
     command = "docker rm test-app-1"
     # command = "docker rm $(docker ps -aq) -f"
     subprocess.run(command, shell=True, check=True)
-    print("Removed project-app-1 container.")
+    print("已删除 test-app-1 容器。")
 
 
 # 运行docker rmi命令
@@ -52,7 +49,7 @@ def run_docker_rmi():
     command = "docker rmi bdc2026"
     # command = "docker rmi $(docker images -aq) -f"
     subprocess.run(command, shell=True, check=True)
-    print("Removed bdc2026 image.")
+    print("已删除 bdc2026 镜像。")
 
 
 # 运行docker load命令
@@ -60,7 +57,7 @@ def run_docker_load(tar_file):
     command = f"docker load -i {tar_file}"
     print(command)
     subprocess.run(command, shell=True, check=True)
-    print(f"Loaded image from {tar_file}.")
+    print(f"已从 {tar_file} 加载镜像。")
 
 
 # 运行docker-compose up命令
@@ -68,7 +65,7 @@ def run_docker_compose_up(tar_name):
     # command = "docker compose up"
     command = "docker compose -p test up -d"
     subprocess.run(command, shell=True, check=True)
-    print("Started docker compose.")
+    print("已启动 docker compose。")
 
     sumtm = 0
     client = get_docker_client()
@@ -85,11 +82,11 @@ def run_docker_compose_up(tar_name):
             break
     command = "docker compose down"
     subprocess.run(command, shell=True, check=True)
-    print("DOWN docker compose.")
+    print("已停止 docker compose。")
 
     command = f"cp {DATA_ROOT_PATH}/test/output/result.csv ./test/results_output/{tar_name}.csv"
     subprocess.run(command, shell=True, check=True)
-    print("Started copy")
+    print(f"已复制预测结果到 ./test/results_output/{tar_name}.csv。")
 
 
 # 运行score.sh命令
@@ -97,25 +94,23 @@ def run_score(file_name):
     team_name = file_name.split("/")[-1].split(".")[0]  # 获取文件名作为team_name
     command = [sys.executable, "test/score_docker.py", team_name]
     subprocess.run(command, check=True)
-    print("Started score_docker.py")
+    print("已完成 score_docker.py 评分。")
 
-    # 读取1.csv的第一行数据
-    df1 = pd.read_csv("./temp/tmp.csv")
+    df1 = pd.read_csv(TEMP_SCORE_PATH)
     print(df1)
     try:
         df2 = pd.read_csv("./test/result.csv")
     except FileNotFoundError:
-        print("result.csv not found, creating an empty DataFrame.")
+        print("未找到 ./test/result.csv，将创建新的本地汇总评分表。")
         df2 = pd.DataFrame(columns=["Team Name", "Final Score"])
 
     # print(df1)
     # print(df2)
     df_combined = pd.concat([df2, df1], ignore_index=True)
 
-    # 将修改后的df2追加到2.csv的末尾
     df_combined.to_csv("./test/result.csv", mode="w", index=False)
 
-    print("file_name列已成功添加到result.csv的末尾。")
+    print("已追加评分结果到 ./test/result.csv。")
 
 
 # 输出文件路径

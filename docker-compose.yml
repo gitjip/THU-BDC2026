@@ -7,7 +7,7 @@ services:
       - ./test/output:/app/output
       - ./temp:/app/temp
     working_dir: /app
-    # 先临时替换命令，验证GPU是否能访问
+    # 本地批量测试时由挂载的 data/run.sh 驱动容器内流程
     command: /bin/bash /app/data/run.sh
     # 核心配置：指定NVIDIA运行时+暴露GPU
     runtime: nvidia

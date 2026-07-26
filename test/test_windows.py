@@ -14,12 +14,12 @@ TEST_DIR = DATA_ROOT_PATH / "test"
 TEMP_DIR = DATA_ROOT_PATH / "temp"
 OUTPUT_DIR = TEST_DIR / "output"
 RESULTS_OUTPUT_DIR = TEST_DIR / "results_output"
+TEMP_SCORE_PATH = TEMP_DIR / "latest_score.csv"
 
 
 def delete_file() -> None:
 	output_target = TEST_DIR / "output"
 	temp_target = TEMP_DIR
-	tmp_csv = TEMP_DIR / "tmp.csv"
 
 	if output_target.exists():
 		for item in output_target.iterdir():
@@ -35,32 +35,30 @@ def delete_file() -> None:
 			elif item.is_dir():
 				shutil.rmtree(item, ignore_errors=True)
 
-	tmp_csv.unlink(missing_ok=True)
-
 
 def run_docker_rm() -> None:
 	command = ["docker", "rm", "test-app-1"]
 	subprocess.run(command, check=True)
-	print("Removed test-app-1 container.")
+	print("已删除 test-app-1 容器。")
 
 
 def run_docker_rmi() -> None:
 	command = ["docker", "rmi", "bdc2026"]
 	subprocess.run(command, check=True)
-	print("Removed bdc2026 image.")
+	print("已删除 bdc2026 镜像。")
 
 
 def run_docker_load(tar_file: Path) -> None:
 	command = ["docker", "load", "-i", str(tar_file)]
 	print(" ".join(command))
 	subprocess.run(command, check=True)
-	print(f"Loaded image from {tar_file}.")
+	print(f"已从 {tar_file} 加载镜像。")
 
 
 def run_docker_compose_up(tar_name: str, timeout_seconds: int = 60 * 60 * 8 + 300) -> None:
 	up_command = ["docker", "compose", "-p", "test", "up", "-d"]
 	subprocess.run(up_command, check=True)
-	print("Started docker-compose.")
+	print("已启动 docker compose。")
 
 	elapsed = 0
 	client = docker.from_env()
@@ -79,22 +77,22 @@ def run_docker_compose_up(tar_name: str, timeout_seconds: int = 60 * 60 * 8 + 30
 
 	down_command = ["docker", "compose", "down"]
 	subprocess.run(down_command, check=True)
-	print("DOWN docker compose.")
+	print("已停止 docker compose。")
 
 	RESULTS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 	src = OUTPUT_DIR / "result.csv"
 	dst = RESULTS_OUTPUT_DIR / f"{tar_name}.csv"
 	shutil.copy2(src, dst)
-	print(f"Copied output to {dst}")
+	print(f"已复制预测结果到 {dst}。")
 
 
 def run_score(file_name: str) -> None:
 	team_name = Path(file_name).stem
 	command = [sys.executable, "test/score_docker.py", team_name]
 	subprocess.run(command, check=True)
-	print("Started score_docker.py")
+	print("已完成 score_docker.py 评分。")
 
-	df1 = pd.read_csv("./temp/tmp.csv")
+	df1 = pd.read_csv(TEMP_SCORE_PATH)
 	print(df1)
 	try:
 		df2 = pd.read_csv("./test/result.csv")
@@ -104,7 +102,7 @@ def run_score(file_name: str) -> None:
 	df_combined = pd.concat([df2, df1], ignore_index=True)
 	df_combined.to_csv("./test/result.csv", mode="w", index=False)
 
-	print("file_name列已成功添加到result.csv的末尾。")
+	print("已追加评分结果到 ./test/result.csv。")
 
 
 def read_tar_files(input_file: Path) -> list[str]:
