@@ -48,6 +48,7 @@ config = {
     'lr_scheduler': os.environ.get('BDC_LR_SCHEDULER', 'plateau'),
     'lr_factor': _env_float('BDC_LR_FACTOR', 0.5),
     'lr_patience': _env_int('BDC_LR_PATIENCE', 1),
+    'lr_threshold': _env_float('BDC_LR_THRESHOLD', 1e-4),
     'min_learning_rate': _env_float('BDC_MIN_LR', 1e-6),
     'early_stopping_patience': _env_int('BDC_EARLY_STOPPING_PATIENCE', 2 if fast_dev_mode else 3),
     'early_stopping_min_delta': _env_float('BDC_EARLY_STOPPING_MIN_DELTA', 1e-4),

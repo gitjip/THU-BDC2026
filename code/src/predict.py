@@ -2,6 +2,7 @@ import os
 import multiprocessing as mp
 import logging
 import argparse
+import sys
 
 import joblib
 import numpy as np
@@ -22,6 +23,10 @@ from model import StockTransformer
 from utils import engineer_features_39, engineer_features_158plus39
 
 logger = logging.getLogger(__name__)
+
+
+def show_progress_bar():
+	return sys.stderr.isatty()
 
 
 feature_cloums_map = {
@@ -107,7 +112,7 @@ def preprocess_predict_data(df, stockid2idx):
 	num_processes = min(config.get('num_processes', 10), mp.cpu_count(), len(groups))
 	logger.info("开始预测集特征工程: 股票数=%s, 进程数=%s", len(groups), num_processes)
 	with mp.Pool(processes=num_processes) as pool:
-		processed_list = list(tqdm(pool.imap(feature_engineer, groups), total=len(groups), desc='预测集特征工程'))
+		processed_list = list(tqdm(pool.imap(feature_engineer, groups), total=len(groups), desc='预测集特征工程', disable=not show_progress_bar()))
 
 	processed = pd.concat(processed_list).reset_index(drop=True)
 	processed['instrument'] = processed['股票代码'].map(stockid2idx)

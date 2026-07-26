@@ -17,9 +17,33 @@ import json
 import multiprocessing as mp
 import random
 import logging
+import sys
+import time
 from data_utils import load_stock_data, setup_logging, split_train_val_by_trading_days
 
 logger = logging.getLogger(__name__)
+
+
+def format_duration(seconds):
+    seconds = int(round(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s"
+    if minutes:
+        return f"{minutes}m{seconds:02d}s"
+    return f"{seconds}s"
+
+
+def log_section(title):
+    line = "=" * 72
+    logger.info("\n%s\n%s\n%s", line, title, line)
+
+
+def show_progress_bar():
+    return sys.stderr.isatty()
+
+
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -76,7 +100,7 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
     num_processes = min(config.get('num_processes', 10), mp.cpu_count(), len(groups))
     logger.info("开始%s: 股票数=%s, 进程数=%s", desc, len(groups), num_processes)
     with mp.Pool(processes=num_processes) as pool:
-        processed_list = list(tqdm(pool.imap(feature_engineer, groups), total=len(groups), desc=desc))
+        processed_list = list(tqdm(pool.imap(feature_engineer, groups), total=len(groups), desc=desc, disable=not show_progress_bar()))
 
     processed = pd.concat(processed_list).reset_index(drop=True)
 
@@ -310,14 +334,26 @@ def collate_fn(batch):
         'masks': torch.stack(masks)                      # [batch, max_stocks]
     }
 
+
+def calculate_grad_norm(parameters):
+    total_norm = 0.0
+    for parameter in parameters:
+        if parameter.grad is None:
+            continue
+        param_norm = parameter.grad.detach().data.norm(2)
+        total_norm += param_norm.item() ** 2
+    return total_norm ** 0.5
+
 # 排序训练函数
 def train_ranking_model(model, dataloader, criterion, optimizer, device, epoch, writer):
     model.train()
     total_loss = 0
     total_metrics = {}
     local_step = 0
+    grad_norm_total = 0.0
+    grad_norm_steps = 0
     
-    for batch in tqdm(dataloader, desc=f"Training Epoch {epoch+1}"):
+    for batch in tqdm(dataloader, desc=f"Training Epoch {epoch+1}", disable=not show_progress_bar()):
         sequences = batch['sequences'].to(device)    # [batch, max_stocks, seq_len, features]
         targets = batch['targets'].to(device)        # [batch, max_stocks] 真实涨跌幅
         relevance = batch['relevance'].to(device)    # [batch, max_stocks] 预处理的相关性得分
@@ -361,8 +397,13 @@ def train_ranking_model(model, dataloader, criterion, optimizer, device, epoch, 
             batch_loss.backward()
             if config.get('enable_grad_clip', True):
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config['max_grad_norm'])
-                if writer:
-                    writer.add_scalar('train/grad_norm', grad_norm, global_step=epoch*len(dataloader)+local_step)
+                grad_norm_value = float(grad_norm.item() if hasattr(grad_norm, "item") else grad_norm)
+            else:
+                grad_norm_value = calculate_grad_norm(model.parameters())
+            grad_norm_total += grad_norm_value
+            grad_norm_steps += 1
+            if writer:
+                writer.add_scalar('train/grad_norm', grad_norm_value, global_step=epoch*len(dataloader)+local_step)
             optimizer.step()
             
             total_loss += batch_loss.item()
@@ -385,8 +426,9 @@ def train_ranking_model(model, dataloader, criterion, optimizer, device, epoch, 
     if local_step > 0:
         for k in total_metrics:
             total_metrics[k] /= local_step
+    avg_grad_norm = grad_norm_total / grad_norm_steps if grad_norm_steps > 0 else 0.0
     
-    return total_loss / len(dataloader) if len(dataloader) > 0 else 0, total_metrics
+    return total_loss / len(dataloader) if len(dataloader) > 0 else 0, total_metrics, avg_grad_norm
 
 def evaluate_ranking_model(model, dataloader, criterion, device, writer, epoch):
     model.eval()
@@ -395,7 +437,7 @@ def evaluate_ranking_model(model, dataloader, criterion, device, writer, epoch):
     num_batches = 0
     
     with torch.no_grad():
-        for batch in tqdm(dataloader, desc=f"Evaluating Epoch {epoch+1}"):
+        for batch in tqdm(dataloader, desc=f"Evaluating Epoch {epoch+1}", disable=not show_progress_bar()):
             sequences = batch['sequences'].to(device)
             targets = batch['targets'].to(device)
             masks = batch['masks'].to(device)
@@ -475,6 +517,8 @@ def build_lr_scheduler(optimizer):
             factor=config.get('lr_factor', 0.5),
             patience=config.get('lr_patience', 1),
             min_lr=config.get('min_learning_rate', 1e-6),
+            threshold=config.get('lr_threshold', 1e-4),
+            threshold_mode='abs',
         )
 
     if scheduler_type == 'linear':
@@ -512,6 +556,12 @@ def log_runtime_environment(device):
     logger.info("CPU 核心数: %s", mp.cpu_count())
 
 
+def write_training_history(output_dir, records):
+    history_path = os.path.join(output_dir, 'training_history.csv')
+    pd.DataFrame(records).to_csv(history_path, index=False)
+    return history_path
+
+
 def split_train_val_by_recent_trading_days(df, sequence_length):
     """按真实交易日划分验证集，并为验证集补足历史窗口上下文。"""
     return split_train_val_by_trading_days(
@@ -531,6 +581,7 @@ def main():
     os.makedirs(output_dir,exist_ok=True)
     setup_logging("bdc.train", os.path.join(output_dir, 'train.log'))
     logger = logging.getLogger("bdc.train")
+    run_start_time = time.perf_counter()
     torch_num_threads = config.get('torch_num_threads', 0)
     if torch_num_threads and torch_num_threads > 0:
         torch.set_num_threads(torch_num_threads)
@@ -667,12 +718,13 @@ def main():
     )
     scheduler = build_lr_scheduler(optimizer)
     logger.info(
-        "训练策略: epochs<=%s, lr=%s, weight_decay=%s, scheduler=%s, lr_patience=%s, early_stopping_patience=%s, grad_clip=%s",
+        "训练策略: epochs<=%s, lr=%s, weight_decay=%s, scheduler=%s, lr_patience=%s, lr_threshold=%s, early_stopping_patience=%s, grad_clip=%s",
         config['num_epochs'],
         config['learning_rate'],
         config.get('weight_decay', 1e-5),
         config.get('lr_scheduler', 'plateau'),
         config.get('lr_patience', 1),
+        config.get('lr_threshold', 1e-4),
         config.get('early_stopping_patience', 0),
         config.get('enable_grad_clip', True),
     )
@@ -686,33 +738,42 @@ def main():
         stop_reason = 'max_epochs'
         min_delta = config.get('early_stopping_min_delta', 1e-4)
         early_stopping_patience = config.get('early_stopping_patience', 0)
+        history_records = []
+        log_section("开始训练")
         
         for epoch in range(config['num_epochs']):
-            logger.info("=== Epoch %s/%s ===", epoch + 1, config['num_epochs'])
+            epoch_number = epoch + 1
+            epoch_start_time = time.perf_counter()
+            log_section(f"Epoch {epoch_number}/{config['num_epochs']}")
             
             # 训练
-            train_loss, train_metrics = train_ranking_model(
+            train_start_time = time.perf_counter()
+            train_loss, train_metrics, avg_grad_norm = train_ranking_model(
                 model, train_loader, criterion, optimizer, device, epoch, writer
             )
+            train_seconds = time.perf_counter() - train_start_time
             
-            logger.info("Train Loss: %.4f", train_loss)
+            logger.info("Train Loss: %.4f | avg_grad_norm=%.6f | 耗时=%s", train_loss, avg_grad_norm, format_duration(train_seconds))
             for k, v in train_metrics.items():
                 logger.info("Train %s: %.4f", k, v)
             
             # 验证
+            eval_start_time = time.perf_counter()
             eval_loss, eval_metrics = evaluate_ranking_model(
                 model, val_loader, criterion, device, writer, epoch
             )
+            eval_seconds = time.perf_counter() - eval_start_time
             
-            logger.info("Eval Loss: %.4f", eval_loss)
+            logger.info("Eval Loss: %.4f | 耗时=%s", eval_loss, format_duration(eval_seconds))
             for k, v in eval_metrics.items():
                 logger.info("Eval %s: %.4f", k, v)
 
             # 保存最佳模型（基于final score）
             current_final_score = eval_metrics.get('final_score', 0.0)
-            if current_final_score > best_score + min_delta:
+            improved = current_final_score > best_score + min_delta
+            if improved:
                 best_score = current_final_score
-                best_epoch = epoch + 1
+                best_epoch = epoch_number
                 epochs_without_improvement = 0
                 torch.save(model.state_dict(), os.path.join(output_dir, 'best_model.pth'))
                 logger.info("保存最佳模型: %s | final_score=%.4f", os.path.join(output_dir, 'best_model.pth'), best_score)
@@ -736,7 +797,28 @@ def main():
             else:
                 logger.info("当前学习率: %.8f", current_lr)
 
-            stopped_epoch = epoch + 1
+            epoch_seconds = time.perf_counter() - epoch_start_time
+            stopped_epoch = epoch_number
+            history_records.append(
+                {
+                    "epoch": epoch_number,
+                    "train_loss": train_loss,
+                    "eval_loss": eval_loss,
+                    "train_final_score": train_metrics.get("final_score", 0.0),
+                    "eval_final_score": current_final_score,
+                    "learning_rate": current_lr,
+                    "best_score": best_score,
+                    "epochs_without_improvement": epochs_without_improvement,
+                    "avg_grad_norm": avg_grad_norm,
+                    "train_seconds": round(train_seconds, 3),
+                    "eval_seconds": round(eval_seconds, 3),
+                    "epoch_seconds": round(epoch_seconds, 3),
+                    "improved": improved,
+                }
+            )
+            history_path = write_training_history(output_dir, history_records)
+            logger.info("Epoch %s 完成: 耗时=%s | history=%s", epoch_number, format_duration(epoch_seconds), history_path)
+
             if early_stopping_patience and epochs_without_improvement >= early_stopping_patience:
                 stop_reason = f'early_stopping_patience_{early_stopping_patience}'
                 logger.info(
@@ -747,16 +829,23 @@ def main():
                 )
                 break
 
+        total_seconds = time.perf_counter() - run_start_time
+        final_lr = get_current_lr(optimizer)
         logger.info(
-            "训练完成: 最佳 epoch=%s, 最佳 final_score=%.4f, 实际 epoch=%s, 结束原因=%s",
+            "训练完成: 最佳 epoch=%s, 最佳 final_score=%.4f, 实际 epoch=%s, 结束原因=%s, 总耗时=%s",
             best_epoch,
             best_score,
             stopped_epoch,
             stop_reason,
+            format_duration(total_seconds),
         )
         with open(os.path.join(output_dir, 'final_score.txt'), 'w') as f:
             f.write(f"Best epoch: {best_epoch}\nBest final_score: {best_score:.6f}\n")
             f.write(f"Stopped epoch: {stopped_epoch}\nStop reason: {stop_reason}\n")
+            f.write(f"Total duration: {format_duration(total_seconds)}\n")
+            f.write(f"Total seconds: {total_seconds:.3f}\n")
+            f.write(f"Final learning_rate: {final_lr:.10f}\n")
+            f.write(f"Training history: {os.path.join(output_dir, 'training_history.csv')}\n")
 
         if writer:
             writer.close()

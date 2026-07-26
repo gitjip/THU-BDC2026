@@ -1,6 +1,6 @@
 # 训练策略与硬件取舍
 
-## 1. v1.0.1 观察
+## 1. v1.0.1 到 v1.1.5 观察
 
 `experiments/v1.0.1` 使用 CPU 训练，配置为 39 特征、45 日序列、`d_model=96`、2 层 Transformer、每个目标日抽样 120 只股票、5 个 epoch。
 
@@ -9,6 +9,7 @@
 - 训练设备为 `cpu`。本机 Intel Arc 130T 不能按常规 CUDA 路线被 PyTorch 自动使用，所以训练主要吃 CPU。
 - 多个窗口第 1 到第 3 个 epoch 已达到最佳内部验证分数，后续 epoch 继续运行但验证 `final_score` 下降。
 - 单次训练时间不算长，但 walk-forward 会按窗口数线性叠加；4 个窗口加最终模型相当于训练 5 次。
+- `v1.1.5` 的慢参数在 3 个 walk-forward 窗口里相对最好，但均值仍为负，且窗口间波动很大。它可以作为候选方向继续复核，不能直接当成稳定提升。
 
 因此当前优先改训练过程，而不是盲目加大模型。
 
@@ -19,7 +20,8 @@
 - `ReduceLROnPlateau`：验证 `final_score` 停滞时把学习率乘以 `lr_factor`；
 - 早停：连续多个 epoch 没有超过最佳分数加 `early_stopping_min_delta` 时停止；
 - 梯度裁剪：默认按 `max_grad_norm=5.0` 裁剪，降低训练不稳定风险；
-- `final_score.txt`：记录最佳 epoch、最佳分数、实际停止 epoch 和停止原因。
+- `training_history.csv`：逐 epoch 记录 train/eval loss、final_score、学习率、梯度范数和耗时；
+- `final_score.txt`：记录最佳 epoch、最佳分数、实际停止 epoch、停止原因、总耗时和最终学习率。
 
 这些设置不会改变“用过去预测未来”的训练/预测语义，只是减少无效训练，并让调参日志更容易判断。
 
@@ -31,18 +33,44 @@
 
 ```bash
 sh tune.sh quick --skip-final
-sh tune.sh v1.1.0 balanced --skip-final
+sh tune.sh v1.2.0 balanced --skip-final
 ```
 
 如果一个 epoch 仍然太慢，优先继续降低这些参数：
 
 ```bash
-BDC_TRAIN_TARGET_DAYS=36 BDC_MAX_STOCKS_PER_DAY=80 sh tune.sh v1.1.0 balanced --skip-final
+BDC_TRAIN_TARGET_DAYS=36 BDC_MAX_STOCKS_PER_DAY=80 sh tune.sh v1.2.0 balanced --skip-final
 ```
 
 不要把日常调试直接等同于冲分结果。`quick` 和 `balanced` 是为了快速发现代码问题和大致方向，分数只能和相同档位、相近窗口的版本比较。
 
-## 4. 赛方机器约束
+`BDC_TORCH_NUM_THREADS` 控制 PyTorch 在 CPU 上做矩阵计算时能用多少线程，和你的 14 核 CPU 直接相关。本机 CPU 训练可以试 8 到 14；赛方机器有 RTX 4060，训练通常走 CUDA，所以普通档位不默认绑死到 14，避免 CPU 线程抢占和内存压力。
+
+如果要复核 `v1.1.5` 风格的慢参数，用独立 `large` 档位：
+
+```bash
+sh tune.sh v1.2.0 large --skip-final
+```
+
+`large` 默认 3 个窗口、20 个 epoch 上限、较大的前馈层和 `BDC_TORCH_NUM_THREADS=14`。它不适合每次日常调试都跑。
+
+## 4. 平台期和震荡判断
+
+优先看每个模型目录里的：
+
+```text
+training_history.csv
+final_score.txt
+train.log
+```
+
+简单判断：
+
+- train loss 也不降，且 `avg_grad_norm` 很小：可能欠拟合、学习率过低或梯度太弱。
+- train loss 下降，但 eval loss 上升、eval final_score 震荡：更像过拟合或验证窗口噪声。
+- walk-forward 外部分数和训练内部 `final_score` 不一致是正常的，调参最终以后者之外的 `summary.csv` 多窗口均值为主。
+
+## 5. 赛方机器约束
 
 赛事文档要求代码可在 i7-13650H、16GB 内存、RTX 4060 8GB 显存、50GB 存储上运行；预测不超过 5 分钟，训练不超过 8 小时，运行时不得联网。
 

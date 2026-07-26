@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -23,21 +24,22 @@ REQUIRED_COLUMNS = {
 
 def setup_logging(name: str, log_file: str | Path | None = None) -> logging.Logger:
     def build_handlers() -> list[logging.Handler]:
-        formatter = logging.Formatter(
+        file_formatter = logging.Formatter(
             fmt="%(asctime)s | %(levelname)s | %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+        console_formatter = logging.Formatter(fmt="%(message)s")
         handlers: list[logging.Handler] = []
 
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(console_formatter)
         handlers.append(stream_handler)
 
         if log_file is not None:
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
             file_handler = logging.FileHandler(log_path, encoding="utf-8")
-            file_handler.setFormatter(formatter)
+            file_handler.setFormatter(file_formatter)
             handlers.append(file_handler)
 
         return handlers

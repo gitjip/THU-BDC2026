@@ -31,6 +31,10 @@ case "${1:-}" in
     profile="balanced"
     shift
     ;;
+  large|slow|candidate|--large|--slow|--candidate)
+    profile="large"
+    shift
+    ;;
   full|--full)
     profile="full"
     shift
@@ -58,6 +62,7 @@ case "$profile" in
     set_default BDC_LR_SCHEDULER plateau
     set_default BDC_LR_PATIENCE 1
     set_default BDC_LR_FACTOR 0.5
+    set_default BDC_LR_THRESHOLD 1e-4
     set_default BDC_MIN_LR 1e-6
     set_default BDC_EARLY_STOPPING_PATIENCE 2
     set_default BDC_EARLY_STOPPING_MIN_DELTA 1e-4
@@ -84,12 +89,40 @@ case "$profile" in
     set_default BDC_LR_SCHEDULER plateau
     set_default BDC_LR_PATIENCE 1
     set_default BDC_LR_FACTOR 0.5
+    set_default BDC_LR_THRESHOLD 1e-4
     set_default BDC_MIN_LR 1e-6
     set_default BDC_EARLY_STOPPING_PATIENCE 2
     set_default BDC_EARLY_STOPPING_MIN_DELTA 1e-4
     set_default BDC_GRAD_CLIP 1
     set_default BDC_NUM_PROCESSES 6
     set_default BDC_TORCH_NUM_THREADS 4
+    set_default BDC_TENSORBOARD 0
+    ;;
+  large)
+    set_default BDC_WF_WINDOWS 3
+    set_default BDC_FEATURE_NUM 39
+    set_default BDC_SEQUENCE_LENGTH 45
+    set_default BDC_TRAIN_TARGET_DAYS 60
+    set_default BDC_VAL_DAYS 5
+    set_default BDC_MAX_STOCKS_PER_DAY 120
+    set_default BDC_D_MODEL 96
+    set_default BDC_NHEAD 4
+    set_default BDC_NUM_LAYERS 3
+    set_default BDC_DIM_FEEDFORWARD 512
+    set_default BDC_BATCH_SIZE 4
+    set_default BDC_NUM_EPOCHS 20
+    set_default BDC_LEARNING_RATE 5e-6
+    set_default BDC_WEIGHT_DECAY 1e-5
+    set_default BDC_LR_SCHEDULER plateau
+    set_default BDC_LR_PATIENCE 1
+    set_default BDC_LR_FACTOR 0.5
+    set_default BDC_LR_THRESHOLD 1e-4
+    set_default BDC_MIN_LR 1e-7
+    set_default BDC_EARLY_STOPPING_PATIENCE 5
+    set_default BDC_EARLY_STOPPING_MIN_DELTA 1e-4
+    set_default BDC_GRAD_CLIP 1
+    set_default BDC_NUM_PROCESSES 6
+    set_default BDC_TORCH_NUM_THREADS 14
     set_default BDC_TENSORBOARD 0
     ;;
   full)
@@ -101,6 +134,7 @@ case "$profile" in
     set_default BDC_LR_SCHEDULER plateau
     set_default BDC_LR_PATIENCE 1
     set_default BDC_LR_FACTOR 0.5
+    set_default BDC_LR_THRESHOLD 1e-4
     set_default BDC_MIN_LR 1e-6
     set_default BDC_EARLY_STOPPING_PATIENCE 3
     set_default BDC_EARLY_STOPPING_MIN_DELTA 1e-4
@@ -110,7 +144,7 @@ case "$profile" in
     set_default BDC_TENSORBOARD 0
     ;;
   *)
-    echo "未知 tune profile: $profile，可选 quick、balanced、full。" >&2
+    echo "未知 tune profile: $profile，可选 quick、balanced、large、full。" >&2
     exit 2
     ;;
 esac

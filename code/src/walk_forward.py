@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPERIMENTS_DIR = REPO_ROOT / "experiments"
 VERSION_FILE = REPO_ROOT / "VERSION"
 logger = logging.getLogger("bdc.walk_forward")
+
+
+def format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    seconds = int(round(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s"
+    if minutes:
+        return f"{minutes}m{seconds:02d}s"
+    return f"{seconds}s"
+
+
+def log_section(title: str) -> None:
+    line = "=" * 72
+    logger.info("\n%s\n%s\n%s", line, title, line)
 
 
 @dataclass
@@ -235,9 +254,10 @@ def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def run_logged(command: list[str], env: dict[str, str], log_path: Path) -> None:
+def run_logged(command: list[str], env: dict[str, str], log_path: Path) -> float:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("运行命令: %s", " ".join(command))
+    start_time = time.perf_counter()
     with log_path.open("w", encoding="utf-8") as log_file:
         log_file.write("$ " + " ".join(command) + "\n\n")
         process = subprocess.Popen(
@@ -251,12 +271,16 @@ def run_logged(command: list[str], env: dict[str, str], log_path: Path) -> None:
         )
         assert process.stdout is not None
         for line in process.stdout:
-            print(line, end="")
+            print(line, end="", flush=True)
             log_file.write(line)
+            log_file.flush()
         return_code = process.wait()
 
+    duration = time.perf_counter() - start_time
+    logger.info("命令完成: 耗时=%s", format_duration(duration))
     if return_code != 0:
         raise subprocess.CalledProcessError(return_code, command)
+    return duration
 
 
 def make_child_env(model_dir: Path, stock_data_file: Path) -> dict[str, str]:
@@ -289,6 +313,7 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
         "BDC_LR_SCHEDULER",
         "BDC_LR_PATIENCE",
         "BDC_LR_FACTOR",
+        "BDC_LR_THRESHOLD",
         "BDC_MIN_LR",
         "BDC_EARLY_STOPPING_PATIENCE",
         "BDC_EARLY_STOPPING_MIN_DELTA",
@@ -300,9 +325,9 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
     return {key: os.environ.get(key) for key in keys if os.environ.get(key) is not None}
 
 
-def run_train(model_dir: Path, stock_data_file: Path, log_path: Path) -> None:
+def run_train(model_dir: Path, stock_data_file: Path, log_path: Path) -> float:
     env = make_child_env(model_dir=model_dir, stock_data_file=stock_data_file)
-    run_logged([sys.executable, "code/src/train.py"], env=env, log_path=log_path)
+    return run_logged([sys.executable, "code/src/train.py"], env=env, log_path=log_path)
 
 
 def run_predict(
@@ -312,14 +337,14 @@ def run_predict(
     submission_date: str | None = None,
     as_of_date: str | None = None,
     target_start_date: str | None = None,
-) -> None:
+) -> float:
     env = make_child_env(model_dir=model_dir, stock_data_file=stock_data_file)
     command = [sys.executable, "code/src/predict.py", "--output", str(result_path)]
     if submission_date:
         command.extend(["--submission-date", submission_date, "--as-of-date", as_of_date or submission_date])
     if target_start_date:
         command.extend(["--target-start-date", target_start_date])
-    run_logged(command, env=env, log_path=result_path.with_suffix(".log"))
+    return run_logged(command, env=env, log_path=result_path.with_suffix(".log"))
 
 
 def normalize_prediction(prediction_path: Path) -> pd.DataFrame:
@@ -413,6 +438,13 @@ def run_window(
     prediction_path = window_dir / "prediction.csv"
     score_path = window_dir / "score.json"
     metadata_path = window_dir / "metadata.json"
+    window_start_time = time.perf_counter()
+    train_seconds = None
+    predict_seconds = None
+
+    log_section(
+        f"{window.name} | as_of={window.as_of_date} | target={window.target_start_date} ~ {window.target_end_date}"
+    )
 
     train_data_path, target_data_path = write_window_data(full_df, window, window_dir)
     write_json(
@@ -432,13 +464,13 @@ def run_window(
         logger.info("%s 已有模型，跳过训练", window.name)
     else:
         logger.info("%s 训练: as_of=%s", window.name, window.as_of_date)
-        run_train(model_dir=model_dir, stock_data_file=train_data_path, log_path=window_dir / "logs" / "train_command.log")
+        train_seconds = run_train(model_dir=model_dir, stock_data_file=train_data_path, log_path=window_dir / "logs" / "train_command.log")
 
     if resume and prediction_path.exists():
         logger.info("%s 已有预测结果，跳过预测", window.name)
     else:
         logger.info("%s 预测: 目标窗口=%s ~ %s", window.name, window.target_start_date, window.target_end_date)
-        run_predict(
+        predict_seconds = run_predict(
             model_dir=model_dir,
             stock_data_file=train_data_path,
             result_path=prediction_path,
@@ -448,8 +480,15 @@ def run_window(
         )
 
     score = calculate_window_score(full_df, prediction_path, window.target_dates)
+    window_seconds = time.perf_counter() - window_start_time
+    score["train_seconds"] = train_seconds
+    score["train_duration"] = format_duration(train_seconds)
+    score["predict_seconds"] = predict_seconds
+    score["predict_duration"] = format_duration(predict_seconds)
+    score["window_seconds"] = window_seconds
+    score["window_duration"] = format_duration(window_seconds)
     write_json(score_path, score)
-    logger.info("%s 验证得分: %.6f", window.name, score["score"])
+    logger.info("%s 验证得分: %.6f | 总耗时=%s", window.name, score["score"], format_duration(window_seconds))
 
     return {
         "version": version,
@@ -467,6 +506,12 @@ def run_window(
         "score": score["score"],
         "oracle_equal_weight_top5": score["oracle_equal_weight_top5"],
         "market_equal_weight": score["market_equal_weight"],
+        "train_seconds": train_seconds,
+        "train_duration": format_duration(train_seconds),
+        "predict_seconds": predict_seconds,
+        "predict_duration": format_duration(predict_seconds),
+        "window_seconds": window_seconds,
+        "window_duration": format_duration(window_seconds),
         "model_dir": str(model_dir.relative_to(REPO_ROOT)),
         "prediction": str(prediction_path.relative_to(REPO_ROOT)),
         "score_file": str(score_path.relative_to(REPO_ROOT)),
@@ -477,18 +522,23 @@ def run_final(full_data_file: Path, experiment_dir: Path, publish_final: bool, r
     final_dir = experiment_dir / "final"
     model_dir = final_dir / "model"
     result_path = final_dir / "result.csv"
+    final_start_time = time.perf_counter()
+    train_seconds = None
+    predict_seconds = None
+
+    log_section("最终模型训练与预测")
 
     if resume and (model_dir / "best_model.pth").exists():
         logger.info("最终模型已存在，跳过训练")
     else:
         logger.info("训练最终模型: %s", model_dir)
-        run_train(model_dir=model_dir, stock_data_file=full_data_file, log_path=final_dir / "logs" / "train_command.log")
+        train_seconds = run_train(model_dir=model_dir, stock_data_file=full_data_file, log_path=final_dir / "logs" / "train_command.log")
 
     if resume and result_path.exists():
         logger.info("最终预测已存在，跳过预测")
     else:
         logger.info("生成最终预测: %s", result_path)
-        run_predict(model_dir=model_dir, stock_data_file=full_data_file, result_path=result_path)
+        predict_seconds = run_predict(model_dir=model_dir, stock_data_file=full_data_file, result_path=result_path)
 
     published_path = None
     if publish_final:
@@ -498,10 +548,19 @@ def run_final(full_data_file: Path, experiment_dir: Path, publish_final: bool, r
         published_path = str(published.relative_to(REPO_ROOT))
         logger.info("已发布最终预测到: %s", published_path)
 
+    final_seconds = time.perf_counter() - final_start_time
+    logger.info("最终流程完成: 耗时=%s", format_duration(final_seconds))
+
     return {
         "model_dir": str(model_dir.relative_to(REPO_ROOT)),
         "prediction": str(result_path.relative_to(REPO_ROOT)),
         "published_prediction": published_path,
+        "train_seconds": train_seconds,
+        "train_duration": format_duration(train_seconds),
+        "predict_seconds": predict_seconds,
+        "predict_duration": format_duration(predict_seconds),
+        "total_seconds": final_seconds,
+        "total_duration": format_duration(final_seconds),
     }
 
 
@@ -519,6 +578,7 @@ def main() -> None:
     prepare_experiment_dir(experiment_dir, resume=args.resume, dry_run=args.dry_run)
     log_path = None if args.dry_run else experiment_dir / "walk_forward.log"
     setup_logging("bdc.walk_forward", log_path)
+    run_start_time = time.perf_counter()
 
     full_df, data_file = load_stock_data(
         REPO_ROOT / "data",
@@ -558,6 +618,7 @@ def main() -> None:
         "tune_env": tune_env,
         "fast_dev_mode": parse_bool_env("BDC_FAST_DEV", False),
         "windows": [build_window_metadata(window, dates) for window in windows],
+        "window_results": [],
         "final": None,
     }
     write_json(experiment_dir / "manifest.json", manifest)
@@ -569,6 +630,7 @@ def main() -> None:
 
     if rows:
         scores = [row["score"] for row in rows]
+        manifest["window_results"] = rows
         manifest["walk_forward_score_mean"] = float(sum(scores) / len(scores))
         manifest["walk_forward_score_min"] = float(min(scores))
         manifest["walk_forward_score_max"] = float(max(scores))
@@ -579,7 +641,11 @@ def main() -> None:
     write_json(experiment_dir / "manifest.json", manifest)
     if args.create_tag:
         create_git_tag(args.version)
-    logger.info("版本 %s 完成", args.version)
+    total_seconds = time.perf_counter() - run_start_time
+    manifest["total_seconds"] = total_seconds
+    manifest["total_duration"] = format_duration(total_seconds)
+    write_json(experiment_dir / "manifest.json", manifest)
+    logger.info("版本 %s 完成 | 总耗时=%s", args.version, format_duration(total_seconds))
 
 
 if __name__ == "__main__":

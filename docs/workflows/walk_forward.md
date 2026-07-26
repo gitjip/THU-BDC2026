@@ -55,45 +55,47 @@ sh tune.sh quick --skip-final --resume
 | --- | --- | ---: | --- | ---: | ---: | ---: | --- | ---: |
 | `quick` | 平时调试 | 1 | 39 | 30 | 24 | 60 | d_model=64, layers=1 | 4 |
 | `balanced` | 常规调参 | 2 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 5 |
+| `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-三个档位都默认使用 `plateau` 学习率调度和早停。`quick`、`balanced` 的早停耐心值为 2，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 和 `balanced` 会明显降低模型表现上限，但能更快暴露代码问题和大致方向。后续冲分时再切回 `full` 或手动放大参数。
+四个档位都默认使用 `plateau` 学习率调度和早停。`quick`、`balanced` 的早停耐心值为 2，`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 和 `balanced` 会明显降低模型表现上限，但能更快暴露代码问题和大致方向。`large` 继承 `v1.1.5` 风格慢参数，用于复核候选方向，不适合每次调试都跑。
 
 ## 5. 正式调参运行
 
 默认跑 `balanced`，并在最后训练一次最终模型、生成最终预测：
 
 ```bash
-sh tune.sh v1.1.0
+sh tune.sh v1.2.0
 ```
 
 常用参数：
 
 ```bash
-sh tune.sh v1.1.0 --windows 5
-sh tune.sh v1.1.0 --windows 5 --step-days 5
-sh tune.sh v1.1.0 --data-file data/stock_data.csv
-sh tune.sh v1.1.0 full --windows 3
+sh tune.sh v1.2.0 --windows 5
+sh tune.sh v1.2.0 --windows 5 --step-days 5
+sh tune.sh v1.2.0 --data-file data/stock_data.csv
+sh tune.sh v1.2.0 large --windows 3
+sh tune.sh v1.2.0 full --windows 3
 ```
 
 默认不覆盖正式提交文件。最终预测会保存在：
 
 ```text
-experiments/v1.1.0/final/result.csv
+experiments/v1.2.0/final/result.csv
 ```
 
 确认这个版本就是要提交的结果后，再显式发布：
 
 ```bash
-sh tune.sh v1.1.0 --resume --publish-final
+sh tune.sh v1.2.0 --resume --publish-final
 ```
 
-这会把 `experiments/v1.1.0/final/result.csv` 复制到 `output/result.csv`。
+这会把 `experiments/v1.2.0/final/result.csv` 复制到 `output/result.csv`。
 
 如果代码已经提交，并且希望流程完成后自动创建本地 Git tag：
 
 ```bash
-sh tune.sh v1.1.0 --resume --create-tag
+sh tune.sh v1.2.0 --resume --create-tag
 ```
 
 `--create-tag` 要求工作区没有未提交改动，避免 tag 指向的代码和实际实验代码不一致。
@@ -103,7 +105,7 @@ sh tune.sh v1.1.0 --resume --create-tag
 每个版本都有独立目录：
 
 ```text
-experiments/v1.1.0/
+experiments/v1.2.0/
   manifest.json
   summary.csv
   walk_forward.log
@@ -132,6 +134,7 @@ experiments/v1.1.0/
 - `manifest.json`：版本、Git commit、数据文件、窗口计划；
 - `windows/*/metadata.json`：窗口元数据，`target_trading_dates` 是实际验证日期，`target_calendar_span_days` 应为 5；
 - `windows/*/model/final_score.txt`：该窗口训练早停位置、最佳 epoch 和最佳内部验证分数；
+- `windows/*/model/training_history.csv`：逐 epoch 训练/验证 loss、final_score、学习率、梯度范数和耗时；
 - `windows/*/score.json`：每个窗口选中的股票、权重和真实收益；
 - `final/result.csv`：该版本最终预测文件。
 

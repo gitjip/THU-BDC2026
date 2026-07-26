@@ -3,9 +3,14 @@ import numpy as np
 import joblib
 import os
 import logging
+import sys
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
+
+
+def show_progress_bar():
+    return sys.stderr.isatty()
 
 # 特征工程
 def _rolling_linear_regression(x, y):
@@ -488,7 +493,7 @@ def create_ranking_dataset_multiprocess(data, features, sequence_length, ranking
             futures = [executor.submit(process_func, date) for date in valid_dates]
             
             # 收集结果
-            for future in tqdm(futures, desc="Processing dates", total=len(valid_dates)):
+            for future in tqdm(futures, desc="Processing dates", total=len(valid_dates), disable=not show_progress_bar()):
                 try:
                     result = future.result(timeout=60)  # 设置超时
                     if result is not None:
@@ -504,7 +509,7 @@ def create_ranking_dataset_multiprocess(data, features, sequence_length, ranking
     except Exception as e:
         print(f"进程池处理出错，回退到串行处理: {e}")
         # 如果多进程出错，回退到串行处理
-        for date in tqdm(valid_dates, desc="串行处理"):
+        for date in tqdm(valid_dates, desc="串行处理", disable=not show_progress_bar()):
             result = process_single_date(date, data, features, sequence_length)
             if result is not None:
                 sequences.append(result['sequences'])
@@ -565,7 +570,7 @@ def create_ranking_dataset_vectorized(
     logger.info("Step 1: 为每只股票生成滑动窗口")
     grouped = data.groupby('instrument')
     
-    for stock_code, group in tqdm(grouped, desc="Processing stocks"):
+    for stock_code, group in tqdm(grouped, desc="Processing stocks", disable=not show_progress_bar()):
         if len(group) < sequence_length:
             continue
         
@@ -600,7 +605,7 @@ def create_ranking_dataset_vectorized(
     if min_window_end_date is not None:
         min_window_end_date = pd.to_datetime(min_window_end_date)
     
-    for date, group in tqdm(grouped_by_date, desc="Aggregating by date"):
+    for date, group in tqdm(grouped_by_date, desc="Aggregating by date", disable=not show_progress_bar()):
         if min_window_end_date is not None and pd.to_datetime(date) < min_window_end_date:
             continue
 
