@@ -20,7 +20,7 @@ walk-forward 的做法是在历史数据中模拟：
 先看将要跑哪些窗口，不训练：
 
 ```bash
-sh tune.sh v1.0.0 debug --dry-run
+sh tune.sh quick --dry-run
 ```
 
 输出里的每个窗口都包含：
@@ -33,20 +33,32 @@ sh tune.sh v1.0.0 debug --dry-run
 快速调试用：
 
 ```bash
-sh tune.sh v1.0.0 debug --windows 1 --skip-final
+sh tune.sh quick --skip-final
 ```
 
-`debug` 会启用 `BDC_FAST_DEV=1`，训练会少取训练目标日、少抽样股票、关闭 TensorBoard，主要用于检查流程是否能跑通。
+`quick` 会启用小模型、39 特征、较短序列和较少股票，主要用于平时检查流程、看方向，分数不适合直接和完整模型比较。`debug`、`fast`、`lite` 都是 `quick` 的别名。
 
 如果中途失败，修复后可继续：
 
 ```bash
-sh tune.sh v1.0.0 debug --windows 1 --skip-final --resume
+sh tune.sh quick --skip-final --resume
 ```
 
-## 4. 正式调参运行
+## 4. 调参档位
 
-默认跑 3 个历史窗口，并在最后训练一次最终模型、生成最终预测：
+`tune.sh` 默认使用 `balanced`。各档位只设置未显式指定的环境变量，你仍可用 `BDC_...` 覆盖。
+
+| 档位 | 用途 | 默认窗口 | 特征 | 序列 | 训练目标日 | 每日股票 | 模型 | epoch |
+| --- | --- | ---: | --- | ---: | ---: | ---: | --- | ---: |
+| `quick` | 平时调试 | 1 | 39 | 30 | 24 | 60 | d_model=64, layers=1 | 3 |
+| `balanced` | 常规调参 | 2 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 3 |
+| `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 3 |
+
+`quick` 和 `balanced` 会明显降低模型表现上限，但能更快暴露代码问题和大致方向。后续冲分时再切回 `full` 或手动放大参数。
+
+## 5. 正式调参运行
+
+默认跑 `balanced`，并在最后训练一次最终模型、生成最终预测：
 
 ```bash
 sh tune.sh v1.0.0
@@ -58,6 +70,7 @@ sh tune.sh v1.0.0
 sh tune.sh v1.0.1 --windows 5
 sh tune.sh v1.0.1 --windows 5 --step-days 5
 sh tune.sh v1.0.1 --data-file data/stock_data.csv
+sh tune.sh v1.0.1 full --windows 3
 ```
 
 默认不覆盖正式提交文件。最终预测会保存在：
@@ -82,7 +95,7 @@ sh tune.sh v1.0.0 --resume --create-tag
 
 `--create-tag` 要求工作区没有未提交改动，避免 tag 指向的代码和实际实验代码不一致。
 
-## 5. 产物位置
+## 6. 产物位置
 
 每个版本都有独立目录：
 
@@ -117,7 +130,7 @@ experiments/v1.0.0/
 - `windows/*/score.json`：每个窗口选中的股票、权重和真实收益；
 - `final/result.csv`：该版本最终预测文件。
 
-## 6. 注意事项
+## 7. 注意事项
 
 - 单个窗口分数波动很大，调参时优先看多个窗口平均值。
 - 窗口越多越稳，但训练次数越多，耗时近似按窗口数线性增加。

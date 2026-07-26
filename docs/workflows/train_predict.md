@@ -149,7 +149,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `val_days`：验证集目标交易日数量，默认 20。
 - `train_target_days`：训练目标交易日数量限制，默认 0 表示不限制；debug 默认 48。
 - `max_stocks_per_day`：每个交易日抽样股票数，默认 0 表示不抽样；debug 默认 120。
-- `num_epochs`：训练轮数，当前为 1。
+- `num_epochs`：训练轮数，当前默认 3；平时可用 `BDC_NUM_EPOCHS` 覆盖。
 - `stock_data_file`：默认 `None`，自动寻找数据；也可以用环境变量 `BDC_STOCK_DATA_FILE` 临时覆盖。
 
 常用环境变量：
@@ -157,6 +157,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 ```bash
 BDC_FAST_DEV=1 sh train.sh
 BDC_TRAIN_TARGET_DAYS=80 BDC_MAX_STOCKS_PER_DAY=180 sh train.sh debug
+BDC_NUM_EPOCHS=1 sh train.sh debug
 BDC_SUBMISSION_DATE=2026-08-02 sh test.sh
 BDC_TARGET_START_DATE=2026-08-08 sh test.sh
 BDC_MARKET_HOLIDAYS=2026-08-03 sh test.sh

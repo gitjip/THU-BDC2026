@@ -130,7 +130,7 @@ sh train.sh
 sh test.sh
 ```
 
-更详细的运行说明见 [GUIDE.md](GUIDE.md)。调参用的多窗口 walk-forward 流程见 [docs/workflows/walk_forward.md](docs/workflows/walk_forward.md)。
+更详细的运行说明见 [GUIDE.md](GUIDE.md)。调参用的多窗口 walk-forward 流程见 [docs/workflows/walk_forward.md](docs/workflows/walk_forward.md)，平时优先用 `sh tune.sh quick --skip-final`。
 
 ---
 

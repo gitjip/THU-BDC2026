@@ -198,6 +198,29 @@ def make_child_env(model_dir: Path, stock_data_file: Path) -> dict[str, str]:
     return env
 
 
+def get_tune_env_snapshot() -> dict[str, str | None]:
+    keys = [
+        "BDC_TUNE_PROFILE",
+        "BDC_FAST_DEV",
+        "BDC_WF_WINDOWS",
+        "BDC_FEATURE_NUM",
+        "BDC_SEQUENCE_LENGTH",
+        "BDC_TRAIN_TARGET_DAYS",
+        "BDC_VAL_DAYS",
+        "BDC_MAX_STOCKS_PER_DAY",
+        "BDC_D_MODEL",
+        "BDC_NHEAD",
+        "BDC_NUM_LAYERS",
+        "BDC_DIM_FEEDFORWARD",
+        "BDC_BATCH_SIZE",
+        "BDC_NUM_EPOCHS",
+        "BDC_NUM_PROCESSES",
+        "BDC_TORCH_NUM_THREADS",
+        "BDC_TENSORBOARD",
+    ]
+    return {key: os.environ.get(key) for key in keys if os.environ.get(key) is not None}
+
+
 def run_train(model_dir: Path, stock_data_file: Path, log_path: Path) -> None:
     env = make_child_env(model_dir=model_dir, stock_data_file=stock_data_file)
     run_logged([sys.executable, "code/src/train.py"], env=env, log_path=log_path)
@@ -408,6 +431,9 @@ def main() -> None:
     windows = build_windows(dates, args.windows, args.target_days, args.step_days)
 
     logger.info("版本: %s", args.version)
+    tune_env = get_tune_env_snapshot()
+    if tune_env:
+        logger.info("调参参数: %s", ", ".join(f"{key}={value}" for key, value in tune_env.items()))
     logger.info("窗口数量: %s", len(windows))
     for window in windows:
         logger.info(
@@ -429,6 +455,7 @@ def main() -> None:
         "repo_root": str(REPO_ROOT),
         "git": git_info,
         "data_file": str(Path(data_file).resolve()),
+        "tune_env": tune_env,
         "fast_dev_mode": parse_bool_env("BDC_FAST_DEV", False),
         "windows": [asdict(window) for window in windows],
         "final": None,
