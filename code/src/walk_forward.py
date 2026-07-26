@@ -27,6 +27,7 @@ logger = logging.getLogger("bdc.walk_forward")
 class WalkForwardWindow:
     name: str
     as_of_date: str
+    mock_submission_date: str
     target_start_date: str
     target_end_date: str
     target_dates: list[str]
@@ -128,26 +129,95 @@ def create_git_tag(version: str) -> None:
     logger.info("已创建本地 Git tag: %s", version)
 
 
+def format_date_list(dates: pd.DatetimeIndex | list[str]) -> list[str]:
+    return [pd.Timestamp(day).normalize().strftime("%Y-%m-%d") for day in dates]
+
+
+def is_consecutive_trading_dates(
+    trading_dates: pd.DatetimeIndex,
+    target_dates: pd.DatetimeIndex | list[str],
+) -> bool:
+    trading_date_list = format_date_list(trading_dates)
+    target_date_list = format_date_list(target_dates)
+    positions = {date: idx for idx, date in enumerate(trading_date_list)}
+
+    if not target_date_list or any(date not in positions for date in target_date_list):
+        return False
+
+    target_positions = [positions[date] for date in target_date_list]
+    expected_positions = list(range(target_positions[0], target_positions[0] + len(target_positions)))
+    return target_positions == expected_positions
+
+
+def is_consecutive_calendar_dates(target_dates: pd.DatetimeIndex | list[str]) -> bool:
+    normalized = pd.DatetimeIndex(pd.to_datetime(target_dates).normalize())
+    if len(normalized) == 0:
+        return False
+    expected = pd.date_range(normalized[0], periods=len(normalized), freq="D")
+    return normalized.equals(expected)
+
+
+def build_window_metadata(window: WalkForwardWindow, trading_dates: pd.DatetimeIndex) -> dict:
+    target_dates = format_date_list(window.target_dates)
+    first_day = pd.Timestamp(target_dates[0])
+    last_day = pd.Timestamp(target_dates[-1])
+    calendar_span_days = int((last_day - first_day).days + 1)
+    return {
+        **asdict(window),
+        "target_window_type": "consecutive_calendar_days_with_stock_data",
+        "target_trading_dates": target_dates,
+        "target_trading_day_count": len(target_dates),
+        "target_calendar_span_days": calendar_span_days,
+        "is_consecutive_calendar_days": is_consecutive_calendar_dates(target_dates),
+        "is_consecutive_trading_days": is_consecutive_trading_dates(trading_dates, target_dates),
+        "date_note": "验证窗口要求连续自然日，并且这些自然日都必须在数据中有交易记录；周末或节假日窗口会被跳过。",
+    }
+
+
 def build_windows(dates: pd.DatetimeIndex, window_count: int, target_days: int, step_days: int) -> list[WalkForwardWindow]:
-    windows: list[WalkForwardWindow] = []
-    latest_target_end_idx = len(dates) - 1
-
-    for offset in reversed(range(window_count)):
-        target_end_idx = latest_target_end_idx - offset * step_days
-        target_start_idx = target_end_idx - target_days + 1
-        as_of_idx = target_start_idx - 1
-        if as_of_idx < 0:
-            raise ValueError("数据交易日不足，无法构建指定数量的 walk-forward 窗口")
-
+    candidates: list[tuple[int, int, pd.DatetimeIndex]] = []
+    for target_start_idx in range(1, len(dates) - target_days + 1):
+        target_end_idx = target_start_idx + target_days - 1
         target_dates = pd.DatetimeIndex(dates[target_start_idx : target_end_idx + 1])
+        if len(target_dates) != target_days:
+            raise ValueError(f"验证窗口交易日数量不等于 {target_days}")
+        if not is_consecutive_trading_dates(dates, target_dates):
+            raise ValueError("验证窗口不是连续交易日，请检查数据日期")
+        if not is_consecutive_calendar_dates(target_dates):
+            continue
+
+        candidates.append((target_start_idx, target_end_idx, target_dates))
+
+    windows: list[WalkForwardWindow] = []
+    last_selected_end_idx: int | None = None
+
+    for target_start_idx, target_end_idx, target_dates in reversed(candidates):
+        if last_selected_end_idx is not None and target_end_idx > last_selected_end_idx - step_days:
+            continue
+
+        as_of_idx = target_start_idx - 1
         window = WalkForwardWindow(
             name=f"window_{len(windows) + 1:02d}",
             as_of_date=pd.Timestamp(dates[as_of_idx]).strftime("%Y-%m-%d"),
+            mock_submission_date=(pd.Timestamp(target_dates[0]) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
             target_start_date=pd.Timestamp(target_dates[0]).strftime("%Y-%m-%d"),
             target_end_date=pd.Timestamp(target_dates[-1]).strftime("%Y-%m-%d"),
             target_dates=[pd.Timestamp(day).strftime("%Y-%m-%d") for day in target_dates],
         )
         windows.append(window)
+        last_selected_end_idx = target_end_idx
+        if len(windows) == window_count:
+            break
+
+    if len(windows) < window_count:
+        raise ValueError(
+            f"可用的连续 {target_days} 个自然日且都有交易数据的验证窗口不足: "
+            f"需要 {window_count} 个，实际 {len(windows)} 个"
+        )
+
+    windows.reverse()
+    for idx, window in enumerate(windows, start=1):
+        window.name = f"window_{idx:02d}"
 
     return windows
 
@@ -231,12 +301,13 @@ def run_predict(
     stock_data_file: Path,
     result_path: Path,
     submission_date: str | None = None,
+    as_of_date: str | None = None,
     target_start_date: str | None = None,
 ) -> None:
     env = make_child_env(model_dir=model_dir, stock_data_file=stock_data_file)
     command = [sys.executable, "code/src/predict.py", "--output", str(result_path)]
     if submission_date:
-        command.extend(["--submission-date", submission_date, "--as-of-date", submission_date])
+        command.extend(["--submission-date", submission_date, "--as-of-date", as_of_date or submission_date])
     if target_start_date:
         command.extend(["--target-start-date", target_start_date])
     run_logged(command, env=env, log_path=result_path.with_suffix(".log"))
@@ -289,7 +360,12 @@ def calculate_window_score(full_df: pd.DataFrame, prediction_path: Path, target_
         "score": score,
         "oracle_equal_weight_top5": oracle_equal_weight_top5,
         "market_equal_weight": market_equal_weight,
+        "target_window_type": "consecutive_calendar_days_with_stock_data",
         "target_dates": target_dates,
+        "target_trading_dates": target_dates,
+        "target_trading_day_count": len(target_dates),
+        "target_calendar_span_days": int((last_day - first_day).days + 1),
+        "is_consecutive_calendar_days": is_consecutive_calendar_dates(target_dates),
         "selected": [
             {
                 "stock_id": row.stock_id,
@@ -315,7 +391,14 @@ def write_window_data(full_df: pd.DataFrame, window: WalkForwardWindow, window_d
     return train_data_path, target_data_path
 
 
-def run_window(full_df: pd.DataFrame, experiment_dir: Path, version: str, window: WalkForwardWindow, resume: bool) -> dict:
+def run_window(
+    full_df: pd.DataFrame,
+    trading_dates: pd.DatetimeIndex,
+    experiment_dir: Path,
+    version: str,
+    window: WalkForwardWindow,
+    resume: bool,
+) -> dict:
     window_dir = experiment_dir / "windows" / window.name
     model_dir = window_dir / "model"
     prediction_path = window_dir / "prediction.csv"
@@ -327,7 +410,7 @@ def run_window(full_df: pd.DataFrame, experiment_dir: Path, version: str, window
         metadata_path,
         {
             "version": version,
-            "window": asdict(window),
+            "window": build_window_metadata(window, trading_dates),
             "train_data": str(train_data_path.relative_to(REPO_ROOT)),
             "target_data": str(target_data_path.relative_to(REPO_ROOT)),
             "model_dir": str(model_dir.relative_to(REPO_ROOT)),
@@ -350,7 +433,8 @@ def run_window(full_df: pd.DataFrame, experiment_dir: Path, version: str, window
             model_dir=model_dir,
             stock_data_file=train_data_path,
             result_path=prediction_path,
-            submission_date=window.as_of_date,
+            submission_date=window.mock_submission_date,
+            as_of_date=window.as_of_date,
             target_start_date=window.target_start_date,
         )
 
@@ -362,9 +446,15 @@ def run_window(full_df: pd.DataFrame, experiment_dir: Path, version: str, window
         "version": version,
         "window": window.name,
         "as_of_date": window.as_of_date,
+        "mock_submission_date": window.mock_submission_date,
         "target_start_date": window.target_start_date,
         "target_end_date": window.target_end_date,
         "target_dates": ",".join(window.target_dates),
+        "target_window_type": score["target_window_type"],
+        "target_trading_day_count": score["target_trading_day_count"],
+        "target_calendar_span_days": score["target_calendar_span_days"],
+        "is_consecutive_calendar_days": score["is_consecutive_calendar_days"],
+        "is_consecutive_trading_days": is_consecutive_trading_dates(trading_dates, window.target_dates),
         "score": score["score"],
         "oracle_equal_weight_top5": score["oracle_equal_weight_top5"],
         "market_equal_weight": score["market_equal_weight"],
@@ -437,9 +527,10 @@ def main() -> None:
     logger.info("窗口数量: %s", len(windows))
     for window in windows:
         logger.info(
-            "%s: as_of=%s, target=%s ~ %s (%s)",
+            "%s: as_of=%s, mock_submission=%s, target=%s ~ %s (%s)",
             window.name,
             window.as_of_date,
+            window.mock_submission_date,
             window.target_start_date,
             window.target_end_date,
             ", ".join(window.target_dates),
@@ -457,14 +548,14 @@ def main() -> None:
         "data_file": str(Path(data_file).resolve()),
         "tune_env": tune_env,
         "fast_dev_mode": parse_bool_env("BDC_FAST_DEV", False),
-        "windows": [asdict(window) for window in windows],
+        "windows": [build_window_metadata(window, dates) for window in windows],
         "final": None,
     }
     write_json(experiment_dir / "manifest.json", manifest)
 
     rows = []
     for window in windows:
-        rows.append(run_window(full_df, experiment_dir, args.version, window, resume=args.resume))
+        rows.append(run_window(full_df, dates, experiment_dir, args.version, window, resume=args.resume))
         write_summary(experiment_dir, rows)
 
     if rows:
