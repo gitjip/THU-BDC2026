@@ -23,7 +23,7 @@
 
 ## 2. 代码结构说明
 
-### [config.py](config.py)
+### [config.py](code/src/config.py)
 统一管理训练与推理参数，包括：
 - 序列长度 `sequence_length`（默认60）；
 - 模型超参数（`d_model`、`nhead`、`num_layers` 等）；
@@ -32,7 +32,7 @@
 - 数据路径和输出路径（默认输出到 `output/`）。
 - 可用 `sh train.sh debug` 进入快速调试模式，限制训练日期和股票数量以缩短本地训练时间。
 
-### [model.py](model.py)
+### [model.py](code/src/model.py)
 定义核心模型 `StockTransformer`，主要由以下模块组成：
 - `PositionalEncoding`：时序位置编码；
 - 时序编码器 `TransformerEncoder`：提取单股票历史序列表示；
@@ -43,7 +43,7 @@
 输入形状：`[batch, num_stocks, seq_len, feature_dim]`  
 输出形状：`[batch, num_stocks]`。
 
-### [utils.py](utils.py)
+### [utils.py](code/src/utils.py)
 包含特征工程与数据集构建逻辑：
 - `engineer_features_39()`：39个技术指标特征；
 - `engineer_features()`：158个Alpha类特征；
@@ -52,7 +52,7 @@
 
 说明：特征工程使用了 `TA-Lib`，若未正确安装会报错。
 
-### [train.py](train.py)
+### [train.py](code/src/train.py)
 训练主脚本，关键内容：
 - 数据预处理：
 	- `_preprocess_common()`：按股票分组并行特征工程、股票ID映射、标签构建；
@@ -73,7 +73,7 @@
 - `final_score.txt`：最佳分数记录；
 - `log/`：TensorBoard日志。
 
-### [predict.py](predict.py)
+### [predict.py](code/src/predict.py)
 推理主脚本，流程：
 1. 加载历史数据，确定提交截止日和未来5个目标交易日；
 2. 执行与训练一致的特征工程；
@@ -129,6 +129,8 @@ sh train.sh
 ```
 sh test.sh
 ```
+
+更详细的运行说明见 [GUIDE.md](GUIDE.md)。调参用的多窗口 walk-forward 流程见 [docs/workflows/walk_forward.md](docs/workflows/walk_forward.md)。
 
 ---
 

@@ -25,3 +25,7 @@ model/*/train.log
 model/*/log/events.out.tfevents.*
 output/predict.log
 temp/latest_score.csv
+
+# Generated walk-forward experiment artifacts
+experiments/*
+!experiments/README.md
