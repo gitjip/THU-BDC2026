@@ -139,6 +139,7 @@ experiments/v1.2.0/
     window_01/
       metadata.json
       prediction.csv
+      prediction_scores.csv
       score.json
       model/
         best_model.pth
@@ -147,6 +148,7 @@ experiments/v1.2.0/
         final_score.txt
   final/
     result.csv
+    result_scores.csv
     model/
       best_model.pth
       scaler.pkl
@@ -159,10 +161,12 @@ experiments/v1.2.0/
 - `summary.csv`：所有窗口的分数汇总；
 - `manifest.json`：版本、Git commit、数据文件、窗口计划；
 - `windows/*/metadata.json`：窗口元数据，`target_trading_dates` 是实际验证日期，`target_calendar_span_days` 应为 5；
+- `windows/*/prediction_scores.csv`：完整候选股票排名和模型分数，用于排查固定选股池；
 - `windows/*/model/final_score.txt`：该窗口训练早停位置、最佳 epoch 和最佳内部验证分数；
 - `windows/*/model/training_history.csv`：逐 epoch 训练/验证 loss、final_score、学习率、梯度范数和耗时；
 - `windows/*/score.json`：每个窗口选中的股票、权重和真实收益；
 - `final/result.csv`：该版本最终预测文件。
+- `final/result_scores.csv`：最终预测的完整候选排名诊断文件，不是提交文件。
 
 ## 8. 注意事项
 

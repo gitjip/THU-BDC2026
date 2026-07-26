@@ -90,7 +90,10 @@ sh test.sh
 
 ```text
 output/result.csv
+output/result_scores.csv
 ```
+
+`result.csv` 是比赛提交文件。`result_scores.csv` 是本地诊断文件，记录所有候选股票的模型排名和原始分数，用来排查模型是否总是选同一批股票；它不是提交目标。
 
 如果要指定提交截止日或预测窗口候选起始日：
 

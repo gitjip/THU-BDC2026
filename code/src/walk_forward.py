@@ -338,12 +338,15 @@ def run_predict(
     model_dir: Path,
     stock_data_file: Path,
     result_path: Path,
+    scores_path: Path | None = None,
     submission_date: str | None = None,
     as_of_date: str | None = None,
     target_start_date: str | None = None,
 ) -> float:
     env = make_child_env(model_dir=model_dir, stock_data_file=stock_data_file)
     command = [sys.executable, "code/src/predict.py", "--output", str(result_path)]
+    if scores_path:
+        command.extend(["--scores-output", str(scores_path)])
     if submission_date:
         command.extend(["--submission-date", submission_date, "--as-of-date", as_of_date or submission_date])
     if target_start_date:
@@ -440,6 +443,7 @@ def run_window(
     window_dir = experiment_dir / "windows" / window.name
     model_dir = window_dir / "model"
     prediction_path = window_dir / "prediction.csv"
+    prediction_scores_path = window_dir / "prediction_scores.csv"
     score_path = window_dir / "score.json"
     metadata_path = window_dir / "metadata.json"
     window_start_time = time.perf_counter()
@@ -460,6 +464,7 @@ def run_window(
             "target_data": str(target_data_path.relative_to(REPO_ROOT)),
             "model_dir": str(model_dir.relative_to(REPO_ROOT)),
             "prediction": str(prediction_path.relative_to(REPO_ROOT)),
+            "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
             "score": str(score_path.relative_to(REPO_ROOT)),
         },
     )
@@ -470,7 +475,7 @@ def run_window(
         logger.info("%s 训练: as_of=%s", window.name, window.as_of_date)
         train_seconds = run_train(model_dir=model_dir, stock_data_file=train_data_path, log_path=window_dir / "logs" / "train_command.log")
 
-    if resume and prediction_path.exists():
+    if resume and prediction_path.exists() and prediction_scores_path.exists():
         logger.info("%s 已有预测结果，跳过预测", window.name)
     else:
         logger.info("%s 预测: 目标窗口=%s ~ %s", window.name, window.target_start_date, window.target_end_date)
@@ -478,6 +483,7 @@ def run_window(
             model_dir=model_dir,
             stock_data_file=train_data_path,
             result_path=prediction_path,
+            scores_path=prediction_scores_path,
             submission_date=window.mock_submission_date,
             as_of_date=window.as_of_date,
             target_start_date=window.target_start_date,
@@ -518,6 +524,7 @@ def run_window(
         "window_duration": format_duration(window_seconds),
         "model_dir": str(model_dir.relative_to(REPO_ROOT)),
         "prediction": str(prediction_path.relative_to(REPO_ROOT)),
+        "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
         "score_file": str(score_path.relative_to(REPO_ROOT)),
     }
 
@@ -526,6 +533,7 @@ def run_final(full_data_file: Path, experiment_dir: Path, publish_final: bool, r
     final_dir = experiment_dir / "final"
     model_dir = final_dir / "model"
     result_path = final_dir / "result.csv"
+    result_scores_path = final_dir / "result_scores.csv"
     final_start_time = time.perf_counter()
     train_seconds = None
     predict_seconds = None
@@ -538,11 +546,16 @@ def run_final(full_data_file: Path, experiment_dir: Path, publish_final: bool, r
         logger.info("训练最终模型: %s", model_dir)
         train_seconds = run_train(model_dir=model_dir, stock_data_file=full_data_file, log_path=final_dir / "logs" / "train_command.log")
 
-    if resume and result_path.exists():
+    if resume and result_path.exists() and result_scores_path.exists():
         logger.info("最终预测已存在，跳过预测")
     else:
         logger.info("生成最终预测: %s", result_path)
-        predict_seconds = run_predict(model_dir=model_dir, stock_data_file=full_data_file, result_path=result_path)
+        predict_seconds = run_predict(
+            model_dir=model_dir,
+            stock_data_file=full_data_file,
+            result_path=result_path,
+            scores_path=result_scores_path,
+        )
 
     published_path = None
     if publish_final:
@@ -558,6 +571,7 @@ def run_final(full_data_file: Path, experiment_dir: Path, publish_final: bool, r
     return {
         "model_dir": str(model_dir.relative_to(REPO_ROOT)),
         "prediction": str(result_path.relative_to(REPO_ROOT)),
+        "prediction_scores": str(result_scores_path.relative_to(REPO_ROOT)),
         "published_prediction": published_path,
         "train_seconds": train_seconds,
         "train_duration": format_duration(train_seconds),

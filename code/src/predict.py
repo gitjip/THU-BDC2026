@@ -94,7 +94,19 @@ def parse_args():
 		default=config.get('prediction_output_path', os.path.join('./output/', 'result.csv')),
 		help='预测结果输出路径，默认 ./output/result.csv',
 	)
+	parser.add_argument(
+		'--scores-output',
+		default=os.environ.get('BDC_PREDICTION_SCORES_OUTPUT'),
+		help='完整候选股票排名诊断文件；默认写到 output 同目录的 *_scores.csv',
+	)
 	return parser.parse_args()
+
+
+def default_scores_output_path(output_path):
+	root, ext = os.path.splitext(output_path)
+	if not ext:
+		ext = '.csv'
+	return f'{root}_scores{ext}'
 
 
 def preprocess_predict_data(df, stockid2idx):
@@ -271,6 +283,7 @@ def main():
 
 	order = np.argsort(scores)[::-1]
 	ranked_stock_ids = [sequence_stock_ids[i] for i in order]
+	ranked_scores = scores[order]
 
 	# 仅输出前5，权重固定 0.2
 	if len(ranked_stock_ids) < 5:
@@ -282,9 +295,21 @@ def main():
 	})
 	output_df.to_csv(output_path, index=False)
 
+	scores_output_path = args.scores_output or default_scores_output_path(output_path)
+	os.makedirs(os.path.dirname(scores_output_path) or '.', exist_ok=True)
+	scores_df = pd.DataFrame({
+		'rank': np.arange(1, len(ranked_stock_ids) + 1),
+		'stock_id': ranked_stock_ids,
+		'pred_score': ranked_scores,
+	})
+	scores_df['selected'] = scores_df['rank'] <= 5
+	scores_df['weight'] = np.where(scores_df['selected'], 0.2, 0.0)
+	scores_df.to_csv(scores_output_path, index=False)
+
 	logger.info("参与排序股票数: %s", len(ranked_stock_ids))
 	logger.info("Top5: %s", ", ".join(top5))
 	logger.info("结果已写入: %s", output_path)
+	logger.info("完整候选排名已写入: %s", scores_output_path)
 
 
 if __name__ == '__main__':
