@@ -104,7 +104,8 @@ sh tune.sh quick --skip-final --resume
 - `summary.csv` 的多窗口均值、最差窗口和耗时；
 - `manifest.json` 里的窗口日期是否一致；
 - `training_history.csv` 中 train loss、eval loss、eval final_score 是否出现明显过拟合或平台；
-- `prediction_scores.csv` 的 top20/top50 是否仍长期重复。
+- `prediction_diagnostics_summary.csv` 的 topK 后验收益和模型分数/真实收益相关性；
+- `prediction_repeated_stocks.csv` 中 top20/top50 是否仍长期重复。
 
 ## 6. 正式调参运行
 
@@ -165,12 +166,17 @@ experiments/v1.2.0/
   manifest.json
   summary.csv
   experiment_note.md
+  prediction_diagnostics_summary.csv
+  prediction_repeated_stocks.csv
+  prediction_diagnostics.json
   walk_forward.log
   windows/
     window_01/
       metadata.json
       prediction.csv
       prediction_scores.csv
+      prediction_diagnostics.csv
+      prediction_diagnostics.json
       score.json
       model/
         best_model.pth
@@ -194,6 +200,11 @@ experiments/v1.2.0/
 - `experiment_note.md`：本次实验的本地简要说明，包含 profile、关键配置、窗口分数和耗时；该文件在 `experiments/` 下，不提交到 Git；
 - `windows/*/metadata.json`：窗口元数据，`target_trading_dates` 是实际验证日期，`target_calendar_span_days` 应为 5；
 - `windows/*/prediction_scores.csv`：完整候选股票排名和模型分数，用于排查固定选股池；
+- `windows/*/prediction_diagnostics.csv`：完整候选排名加目标窗口真实收益、真实收益排名和得分贡献；
+- `windows/*/prediction_diagnostics.json`：窗口级 topK 后验收益、真实 top5 命中情况和排序相关性；
+- `prediction_diagnostics_summary.csv`：实验级窗口诊断汇总；
+- `prediction_repeated_stocks.csv`：实验级重复高分股票统计；
+- `prediction_diagnostics.json`：实验级诊断概要，也会写入 `manifest.json`；
 - `windows/*/model/final_score.txt`：该窗口训练早停位置、最佳 epoch 和最佳内部验证分数；
 - `windows/*/model/training_history.csv`：逐 epoch 训练/验证 loss、final_score、学习率、梯度范数和耗时；
 - `windows/*/score.json`：每个窗口选中的股票、权重和真实收益；

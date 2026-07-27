@@ -38,12 +38,60 @@ prediction_scores.csv 或 result_scores.csv
 
 `*_scores.csv` 不是提交文件，只用于分析模型排序。比赛提交仍然只看 `result.csv`。
 
-## 3. 后续判断方法
+从 `v1.3.5` 开始，walk-forward 会在每个历史验证窗口自动补充真实未来收益诊断：
+
+```text
+windows/window_*/prediction_diagnostics.csv
+windows/window_*/prediction_diagnostics.json
+```
+
+其中 `prediction_diagnostics.csv` 是 `prediction_scores.csv` 加上目标窗口真实收益后的明细，重点列包括：
+
+- `target_return`：按评分口径计算的目标窗口未来收益；
+- `target_return_rank`：该股票在目标窗口里的真实收益排名；
+- `weighted_return`：如果被选中，对最终得分的贡献；
+- `stock_prefix`：股票代码前三位，便于粗看市场板块偏好。
+
+窗口级 `prediction_diagnostics.json` 会记录 top5/top20/top50 等高分区的平均真实收益、模型分数和未来收益的 Spearman 相关、真实收益前 5 名被模型排到哪里。
+
+实验目录还会自动生成：
+
+```text
+prediction_diagnostics_summary.csv
+prediction_repeated_stocks.csv
+prediction_diagnostics.json
+```
+
+- `prediction_diagnostics_summary.csv`：每个窗口一行，适合横向比较 topK 收益和排序相关性；
+- `prediction_repeated_stocks.csv`：统计哪些股票反复出现在 top5/top20/top50，以及这些股票后验收益是否拖分；
+- `prediction_diagnostics.json`：实验级概要，会写入 `manifest.json` 和 `experiment_note.md`。
+
+旧实验可以不重训，直接补诊断：
+
+```bash
+.venv/bin/python code/src/diagnose_predictions.py experiments/v1.3.4
+```
+
+正式最终预测没有未来真实标签，因此只会保留 `final/result_scores.csv`，不会生成带真实收益的诊断。
+
+## 3. v1.3.4 rank-lite 诊断结论
+
+`v1.3.4 noid-rank-lite` 的 3 窗口结果显示，问题不是 top5 偶然选错，而是高分区整体排序变差：
+
+- 3 窗口 top20 只有 `26` 只不同股票，比 noid 和 rank-replace 的 `31` 更集中；
+- `300408`、`002916`、`300316` 多次进入高分区并拖累收益；
+- window_02 中 top5、top20、top50 平均真实收益都为负，说明高分区整体没有信号；
+- 真实收益前 5 名经常被模型排到几十名甚至两百名以后。
+
+当前结论：`rank-lite` 没有缓解固定选股池，反而让候选池更窄，不建议扩跑 12 窗口。
+
+## 4. 后续判断方法
 
 优先检查每个 walk-forward 窗口的：
 
 ```text
 windows/window_*/prediction_scores.csv
+windows/window_*/prediction_diagnostics.csv
 windows/window_*/prediction.csv
 windows/window_*/score.json
 ```
@@ -57,7 +105,7 @@ windows/window_*/score.json
 
 下一步优先用完整排名判断是否存在“固定选股池”。确认后再决定是改特征、改损失，还是做多种子集成。
 
-## 4. 固定选股池的优先嫌疑
+## 5. 固定选股池的优先嫌疑
 
 当前 39 特征默认包含 `instrument`。它是股票代码映射后的整数索引，不是真正的行业、风格或基本面特征。模型把它当连续数值输入时，可能学到“某些编号长期更该被选”的身份偏好。
 
@@ -77,7 +125,7 @@ sh tune.sh v1.2.8 noid --skip-final
 
 `noid` 只是不把 `instrument` 输入模型。股票代码仍用于数据分组、序列构造、打分和输出，不会影响提交文件格式。
 
-## 5. v1.2.8 noid 后续
+## 6. v1.2.8 noid 后续
 
 `v1.2.8 noid` 的多窗口均值改善，说明移除 `instrument` 是值得继续观察的方向。但完整排名也显示，模型更容易选到高波动股票，第二个窗口表现明显拖累均值。
 
@@ -94,7 +142,7 @@ sh tune.sh v1.2.9 noid-stable --skip-final
 - top5 是否继续集中在高波动股票；
 - `prediction_scores.csv` 中入选股票和未入选股票的 `pred_score` 差距是否过大。
 
-## 6. resume 产物注意
+## 7. resume 产物注意
 
 早期版本用 `--resume` 补预测诊断文件时，可能会把 `summary.csv` 中已有训练耗时覆盖为空。后续流程会尽量从旧 `summary.csv` 和 `manifest.json` 保留已有耗时。
 

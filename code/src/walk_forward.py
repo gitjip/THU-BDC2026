@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from data_utils import get_trading_dates, load_stock_data, normalize_stock_codes, setup_logging
+from diagnose_predictions import diagnose_prediction_scores, write_experiment_prediction_diagnostics
 
 
 SEMVER_PATTERN = re.compile(r"^v\d+\.\d+\.\d+$")
@@ -556,6 +557,8 @@ def run_window(
     model_dir = window_dir / "model"
     prediction_path = window_dir / "prediction.csv"
     prediction_scores_path = window_dir / "prediction_scores.csv"
+    prediction_diagnostics_path = window_dir / "prediction_diagnostics.csv"
+    prediction_diagnostics_summary_path = window_dir / "prediction_diagnostics.json"
     score_path = window_dir / "score.json"
     metadata_path = window_dir / "metadata.json"
     window_start_time = time.perf_counter()
@@ -578,6 +581,8 @@ def run_window(
             "model_dir": str(model_dir.relative_to(REPO_ROOT)),
             "prediction": str(prediction_path.relative_to(REPO_ROOT)),
             "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
+            "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
+            "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
             "score": str(score_path.relative_to(REPO_ROOT)),
         },
     )
@@ -603,6 +608,13 @@ def run_window(
         )
 
     score = calculate_window_score(full_df, prediction_path, window.target_dates)
+    diagnostics = diagnose_prediction_scores(
+        prediction_scores_path=prediction_scores_path,
+        target_data_path=target_data_path,
+        output_csv_path=prediction_diagnostics_path,
+        output_json_path=prediction_diagnostics_summary_path,
+        window_name=window.name,
+    )
     elapsed_seconds = time.perf_counter() - window_start_time
     window_seconds = stage_total_seconds(
         train_seconds,
@@ -643,6 +655,12 @@ def run_window(
         "model_dir": str(model_dir.relative_to(REPO_ROOT)),
         "prediction": str(prediction_path.relative_to(REPO_ROOT)),
         "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
+        "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
+        "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
+        "pred_score_target_return_spearman": diagnostics.get("spearman_pred_score_target_return"),
+        "pred_top5_equal_weight_return": diagnostics.get("pred_top5_equal_weight_return"),
+        "pred_top20_equal_weight_return": diagnostics.get("pred_top20_equal_weight_return"),
+        "actual_top5_hits_in_pred_top20": diagnostics.get("actual_top5_hits_in_pred_top20"),
         "score_file": str(score_path.relative_to(REPO_ROOT)),
     }
 
@@ -782,6 +800,22 @@ def write_experiment_note(experiment_dir: Path, manifest: dict) -> None:
         lines.append("- walk-forward 窗口尚未完成。")
 
     final_result = manifest.get("final")
+    prediction_diagnostics = manifest.get("prediction_diagnostics") or {}
+    lines.extend(["", "## 预测诊断", ""])
+    if prediction_diagnostics:
+        lines.append(f"- summary: `{prediction_diagnostics.get('summary_csv', '')}`")
+        lines.append(f"- repeated stocks: `{prediction_diagnostics.get('repeated_stocks_csv', '')}`")
+        lines.append(
+            f"- mean score from diagnostics: `{format_optional_score(prediction_diagnostics.get('mean_score_from_diagnostics'))}`"
+        )
+        lines.append(
+            f"- mean pred-score/return spearman: `{format_optional_score(prediction_diagnostics.get('mean_spearman_pred_score_target_return'))}`"
+        )
+        lines.append(f"- unique selected stocks: `{prediction_diagnostics.get('unique_selected_count', '')}`")
+        lines.append(f"- unique top20 stocks: `{prediction_diagnostics.get('unique_top20_count', '')}`")
+    else:
+        lines.append("- 未生成预测诊断，通常是因为没有运行 walk-forward 窗口。")
+
     lines.extend(["", "## 最终模型", ""])
     if final_result:
         lines.append(f"- final result: `{final_result.get('prediction', '')}`")
@@ -875,6 +909,7 @@ def main() -> None:
         write_summary(experiment_dir, rows)
 
     if rows:
+        manifest["prediction_diagnostics"] = write_experiment_prediction_diagnostics(experiment_dir)
         scores = [row["score"] for row in rows]
         manifest["window_results"] = rows
         manifest["walk_forward_score_mean"] = float(sum(scores) / len(scores))
