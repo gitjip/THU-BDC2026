@@ -120,7 +120,49 @@ experiments/analysis/candidate_pool_v1.2.13_vs_v1.3.2/
 
 这说明候选池并集里有信号，但朴素的二模型重排会把差股票也提前。后续若做集成，应先增加一个可靠的二阶段过滤或风险重排信号，而不是直接平均排名。
 
-## 4. v1.3.4 rank-lite 诊断结论
+## 4. v1.3.7 二阶段风险重排诊断
+
+从 `v1.3.7` 开始，`compare_candidate_pools.py` 会额外评估二阶段过滤/重排信号：
+
+```bash
+.venv/bin/python code/src/compare_candidate_pools.py experiments/v1.2.13 experiments/v1.3.2 --output-dir experiments/analysis/stage2_risk_check
+```
+
+新增输出：
+
+```text
+stage2_rerank_trials.csv
+stage2_rerank_windows.csv
+stage2_rerank_candidates.csv
+```
+
+这些文件仍然是诊断产物，不会改训练、预测或提交文件。风险信号只使用每个窗口 `train_until_as_of` 中已知的历史收盘价计算，不读取目标窗口未来收益。
+
+第一版二阶段候选池只看两个模型各自 top5 的并集，再从并集中选回 5 只股票。已评估的信号包括：
+
+- `volatility_20_rank`：最近 20 个交易日收益波动的横截面分位，越高代表近期越剧烈；
+- `overheat_rank`：最近 5 日和 10 日收益较高者的横截面分位，用于刻画短期过热；
+- `drawdown_rank`：最近 20 日最大回撤的横截面分位；
+- `risk_score`：`0.40 * volatility + 0.35 * overheat + 0.25 * drawdown`；
+- `stock_prefix`：股票代码前三位，用于测试简单前缀集中度限制。
+
+基于 `v1.2.13 noid` 与 `v1.3.2 noid-rank-replace` 的 12 窗口结果：
+
+- `low_vol_then_rank_top5` 最好：均值约 `0.030457`，最差窗口约 `-0.032689`，正分窗口 `8/12`；
+- 同期 `v1.2.13 noid` top5 均值约 `0.024783`，最差窗口约 `-0.063489`；
+- top5 并集均值约 `0.026125`，但平均候选数超过 5，只能作为后验诊断；
+- `low_vol_then_rank_top5` 相比并集均值提升约 `0.004332`，`7/12` 个窗口好于并集，平均筛掉并集里约 `37.4%` 的负收益股票；
+- 但它仍有窗口会选满负收益股票，不能说明风险过滤已经稳定解决问题。
+
+暂时负面结论更明确：
+
+- 综合 `risk_score` 直接惩罚效果很差，`risk_w1/w2/w3` 均值只有约 `0.0067` 到 `0.0072`；
+- `prefix_cap2_*` 前缀集中度限制没有改善均值，说明简单按股票代码前三位限额不够可靠；
+- `low_drawdown_then_rank_top5` 和 `low_risk_then_rank_top5` 也弱于 noid。
+
+当前判断：二阶段过滤有希望，但第一版只应保留 `low_vol_then_rank_top5` 作为下一步候选。不要把综合风险惩罚或前缀限制直接接入正式预测。
+
+## 5. v1.3.4 rank-lite 诊断结论
 
 `v1.3.4 noid-rank-lite` 的 3 窗口结果显示，问题不是 top5 偶然选错，而是高分区整体排序变差：
 
@@ -131,7 +173,7 @@ experiments/analysis/candidate_pool_v1.2.13_vs_v1.3.2/
 
 当前结论：`rank-lite` 没有缓解固定选股池，反而让候选池更窄，不建议扩跑 12 窗口。
 
-## 5. 后续判断方法
+## 6. 后续判断方法
 
 优先检查每个 walk-forward 窗口的：
 
@@ -151,7 +193,7 @@ windows/window_*/score.json
 
 下一步优先用完整排名判断是否存在“固定选股池”。确认后再决定是改特征、改损失，还是做多种子集成。
 
-## 6. 固定选股池的优先嫌疑
+## 7. 固定选股池的优先嫌疑
 
 当前 39 特征默认包含 `instrument`。它是股票代码映射后的整数索引，不是真正的行业、风格或基本面特征。模型把它当连续数值输入时，可能学到“某些编号长期更该被选”的身份偏好。
 
@@ -171,7 +213,7 @@ sh tune.sh v1.2.8 noid --skip-final
 
 `noid` 只是不把 `instrument` 输入模型。股票代码仍用于数据分组、序列构造、打分和输出，不会影响提交文件格式。
 
-## 7. v1.2.8 noid 后续
+## 8. v1.2.8 noid 后续
 
 `v1.2.8 noid` 的多窗口均值改善，说明移除 `instrument` 是值得继续观察的方向。但完整排名也显示，模型更容易选到高波动股票，第二个窗口表现明显拖累均值。
 
@@ -188,7 +230,7 @@ sh tune.sh v1.2.9 noid-stable --skip-final
 - top5 是否继续集中在高波动股票；
 - `prediction_scores.csv` 中入选股票和未入选股票的 `pred_score` 差距是否过大。
 
-## 8. resume 产物注意
+## 9. resume 产物注意
 
 早期版本用 `--resume` 补预测诊断文件时，可能会把 `summary.csv` 中已有训练耗时覆盖为空。后续流程会尽量从旧 `summary.csv` 和 `manifest.json` 保留已有耗时。
 

@@ -139,6 +139,18 @@ sh tune.sh v1.2.0 full --windows 3
 
 输出默认在 `experiments/analysis/` 下，只用于本地复盘，不影响提交结果。
 
+比较两个及以上实验时，还会生成二阶段重排诊断：
+
+```text
+stage2_rerank_trials.csv
+stage2_rerank_windows.csv
+stage2_rerank_candidates.csv
+```
+
+这个诊断会把多个模型的 top5 并集当候选池，再测试“高波动惩罚、近期过热惩罚、回撤过滤、前缀集中度限制”等规则能否从并集里选回更好的 5 只股票。风险信号只来自窗口训练截止日以前的数据，目标窗口真实收益只用于事后评分。
+
+当前 `v1.2.13 noid` 与 `v1.3.2 noid-rank-replace` 的 12 窗口复盘中，`low_vol_then_rank_top5` 暂时最有希望；综合风险分和前缀限额表现较差。它还没有接入正式预测，后续若要使用，应先做更多窗口或更多模型组合复核。
+
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 
 `manifest.json` 中 `tune_env` 记录的是 profile 写入的环境变量；如果命令行传了 `--windows 12` 这类参数，实际生效值看 `walk_forward_args` 和 `windows` 列表。`summary.csv` 中的行数也是实际完成窗口数。

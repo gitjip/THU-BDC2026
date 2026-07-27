@@ -1,6 +1,7 @@
 import argparse
 import itertools
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -8,6 +9,19 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TOP_KS = (5, 10, 20, 50, 100)
+STAGE2_METHODS = (
+    "union_avg_rank_top5",
+    "prefix_cap2_avg_rank_top5",
+    "risk_w1_top5",
+    "risk_w2_top5",
+    "risk_w3_top5",
+    "risk_gate_moderate_top5",
+    "prefix_cap2_risk_w2_top5",
+    "low_risk_then_rank_top5",
+    "low_vol_then_rank_top5",
+    "low_overheat_then_rank_top5",
+    "low_drawdown_then_rank_top5",
+)
 
 
 def clean_top_ks(values) -> list[int]:
@@ -26,6 +40,16 @@ def resolve_path(value: str | Path) -> Path:
     if path.is_absolute():
         return path
     return REPO_ROOT / path
+
+
+def normalize_stock_codes(series: pd.Series) -> pd.Series:
+    codes = series.astype("string").fillna("").str.strip()
+    codes = codes.str.replace(r"\.0$", "", regex=True)
+    extracted = codes.str.extract(r"(\d{6})$", expand=False)
+    codes = extracted.where(extracted.notna(), codes)
+    numeric_mask = codes.str.fullmatch(r"\d{1,6}", na=False)
+    codes.loc[numeric_mask] = codes.loc[numeric_mask].str.zfill(6)
+    return codes.astype(str)
 
 
 def experiment_label(experiment_dir: Path) -> str:
@@ -57,6 +81,15 @@ def read_window_diagnostics(experiment_dir: Path) -> dict[str, pd.DataFrame]:
     if not windows:
         raise FileNotFoundError(f"missing window prediction diagnostics: {experiment_dir}")
     return windows
+
+
+def window_train_data_path(experiment_dir: Path, window: str) -> Path:
+    window_dir = experiment_dir / "windows" / window
+    metadata = read_json(window_dir / "metadata.json")
+    train_data = metadata.get("train_data")
+    if train_data:
+        return resolve_path(train_data)
+    return window_dir / "data" / "train_until_as_of.csv"
 
 
 def scalar_summary(experiment_dir: Path, summary: pd.DataFrame) -> dict:
@@ -149,12 +182,103 @@ def candidate_frame(frames: list[pd.DataFrame]) -> pd.DataFrame:
         )
         merged = merged.merge(partial, on="stock_id", how="left")
     rank_cols = [f"rank_{idx}" for idx in range(len(frames))]
-    return_col = "target_return_0"
     merged["avg_rank"] = merged[rank_cols].mean(axis=1)
     merged["min_rank"] = merged[rank_cols].min(axis=1)
     merged["borda_top20"] = sum((21 - merged[column]).clip(lower=0).fillna(0) for column in rank_cols)
-    merged["target_return"] = merged[return_col]
+    return_cols = [f"target_return_{idx}" for idx in range(len(frames))]
+    merged["target_return"] = merged[return_cols].bfill(axis=1).iloc[:, 0]
     return merged
+
+
+def stock_recent_metrics(train_data_path: Path) -> pd.DataFrame:
+    data = pd.read_csv(train_data_path, dtype={"股票代码": str})
+    required = {"股票代码", "日期", "收盘"}
+    missing = required - set(data.columns)
+    if missing:
+        raise ValueError(f"{train_data_path} missing columns for stage2 metrics: {sorted(missing)}")
+
+    data = data.copy()
+    data["stock_id"] = normalize_stock_codes(data["股票代码"])
+    data["日期"] = pd.to_datetime(data["日期"], errors="coerce").dt.normalize()
+    data["收盘"] = pd.to_numeric(data["收盘"], errors="coerce")
+    data = data.dropna(subset=["stock_id", "日期", "收盘"]).sort_values(["stock_id", "日期"])
+
+    rows = []
+    for stock_id, group in data.groupby("stock_id", sort=False):
+        close = group["收盘"].astype(float).reset_index(drop=True)
+        if len(close) == 0:
+            continue
+
+        def recent_return(days: int) -> float:
+            if len(close) <= days:
+                return 0.0
+            base = close.iloc[-days - 1]
+            if base == 0:
+                return 0.0
+            return float(close.iloc[-1] / base - 1.0)
+
+        daily_returns = close.pct_change(fill_method=None).tail(20).dropna()
+        volatility_20 = float(daily_returns.std()) if len(daily_returns) > 1 else 0.0
+        recent_close = close.tail(20)
+        running_max = recent_close.cummax()
+        drawdowns = recent_close / running_max - 1.0
+        max_drawdown_20 = float(-min(drawdowns.min(), 0.0)) if len(drawdowns) else 0.0
+
+        rows.append(
+            {
+                "stock_id": stock_id,
+                "stock_prefix": stock_id[:3],
+                "recent_return_5": recent_return(5),
+                "recent_return_10": recent_return(10),
+                "recent_return_20": recent_return(20),
+                "volatility_20": volatility_20,
+                "max_drawdown_20": max_drawdown_20,
+            }
+        )
+
+    metrics = pd.DataFrame(rows)
+    if metrics.empty:
+        return metrics
+
+    metrics["overheat_return"] = metrics[["recent_return_5", "recent_return_10"]].max(axis=1)
+    metrics["volatility_20_rank"] = metrics["volatility_20"].rank(pct=True)
+    metrics["overheat_rank"] = metrics["overheat_return"].rank(pct=True)
+    metrics["drawdown_rank"] = metrics["max_drawdown_20"].rank(pct=True)
+    metrics["risk_score"] = (
+        0.40 * metrics["volatility_20_rank"]
+        + 0.35 * metrics["overheat_rank"]
+        + 0.25 * metrics["drawdown_rank"]
+    )
+    return metrics
+
+
+def union_top5_candidates(frames: list[pd.DataFrame], recent_metrics: pd.DataFrame) -> pd.DataFrame:
+    union_ids = sorted(set().union(*(set(frame.sort_values("rank").head(5)["stock_id"]) for frame in frames)))
+    candidates = candidate_frame(frames)
+    candidates = candidates[candidates["stock_id"].isin(union_ids)].copy()
+    rank_cols = [column for column in candidates.columns if re.fullmatch(r"rank_\d+", column)]
+    candidates["top5_borda"] = sum((6 - candidates[column]).clip(lower=0).fillna(0) for column in rank_cols)
+    candidates["avg_rank_fill"] = candidates[rank_cols].fillna(999).mean(axis=1)
+    candidates["min_rank_fill"] = candidates[rank_cols].fillna(999).min(axis=1)
+
+    candidates = candidates.merge(recent_metrics, on="stock_id", how="left", suffixes=("", "_risk"))
+    candidates["stock_prefix"] = candidates["stock_prefix"].fillna(candidates["stock_id"].str[:3])
+    neutral_columns = ["volatility_20_rank", "overheat_rank", "drawdown_rank", "risk_score"]
+    for column in neutral_columns:
+        candidates[column] = candidates[column].fillna(0.5)
+    raw_columns = ["recent_return_5", "recent_return_10", "recent_return_20", "volatility_20", "max_drawdown_20"]
+    for column in raw_columns:
+        candidates[column] = candidates[column].fillna(0.0)
+
+    for weight in (1.0, 2.0, 3.0):
+        label = str(weight).replace(".", "p")
+        candidates[f"risk_adjusted_w{label}"] = candidates["top5_borda"] - weight * candidates["risk_score"]
+    candidates["risk_gate_moderate"] = ~(
+        (candidates["volatility_20_rank"] >= 0.85)
+        | (candidates["overheat_rank"] >= 0.90)
+        | (candidates["drawdown_rank"] >= 0.90)
+    )
+    return candidates
 
 
 def select_candidates(candidates: pd.DataFrame, method: str) -> pd.DataFrame:
@@ -166,6 +290,62 @@ def select_candidates(candidates: pd.DataFrame, method: str) -> pd.DataFrame:
         scored = candidates[candidates["borda_top20"] > 0].copy()
         return scored.sort_values(["borda_top20", "avg_rank"], ascending=[False, True]).head(5)
     raise ValueError(f"unknown candidate selection method: {method}")
+
+
+def select_with_prefix_cap(sorted_candidates: pd.DataFrame, cap: int = 2) -> pd.DataFrame:
+    selected_indices = []
+    prefix_counts: dict[str, int] = {}
+    for idx, row in sorted_candidates.iterrows():
+        prefix = str(row["stock_prefix"])
+        if prefix_counts.get(prefix, 0) >= cap:
+            continue
+        selected_indices.append(idx)
+        prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+        if len(selected_indices) == 5:
+            break
+
+    if len(selected_indices) < 5:
+        for idx in sorted_candidates.index:
+            if idx in selected_indices:
+                continue
+            selected_indices.append(idx)
+            if len(selected_indices) == 5:
+                break
+    return sorted_candidates.loc[selected_indices].copy()
+
+
+def select_stage2_candidates(candidates: pd.DataFrame, method: str) -> pd.DataFrame:
+    if method == "union_avg_rank_top5":
+        return candidates.sort_values(["avg_rank_fill", "min_rank_fill"]).head(5).copy()
+    if method == "prefix_cap2_avg_rank_top5":
+        sorted_candidates = candidates.sort_values(["avg_rank_fill", "min_rank_fill"])
+        return select_with_prefix_cap(sorted_candidates, cap=2)
+    if method == "risk_w1_top5":
+        return candidates.sort_values(["risk_adjusted_w1p0", "avg_rank_fill"], ascending=[False, True]).head(5).copy()
+    if method == "risk_w2_top5":
+        return candidates.sort_values(["risk_adjusted_w2p0", "avg_rank_fill"], ascending=[False, True]).head(5).copy()
+    if method == "risk_w3_top5":
+        return candidates.sort_values(["risk_adjusted_w3p0", "avg_rank_fill"], ascending=[False, True]).head(5).copy()
+    if method == "risk_gate_moderate_top5":
+        sorted_candidates = candidates.sort_values(["risk_adjusted_w2p0", "avg_rank_fill"], ascending=[False, True])
+        filtered = sorted_candidates[sorted_candidates["risk_gate_moderate"]].copy()
+        selected = filtered.head(5)
+        if len(selected) < 5:
+            fill = sorted_candidates[~sorted_candidates["stock_id"].isin(selected["stock_id"])].head(5 - len(selected))
+            selected = pd.concat([selected, fill], ignore_index=True)
+        return selected.copy()
+    if method == "prefix_cap2_risk_w2_top5":
+        sorted_candidates = candidates.sort_values(["risk_adjusted_w2p0", "avg_rank_fill"], ascending=[False, True])
+        return select_with_prefix_cap(sorted_candidates, cap=2)
+    if method == "low_risk_then_rank_top5":
+        return candidates.sort_values(["risk_score", "avg_rank_fill", "min_rank_fill"]).head(5).copy()
+    if method == "low_vol_then_rank_top5":
+        return candidates.sort_values(["volatility_20_rank", "avg_rank_fill", "min_rank_fill"]).head(5).copy()
+    if method == "low_overheat_then_rank_top5":
+        return candidates.sort_values(["overheat_rank", "avg_rank_fill", "min_rank_fill"]).head(5).copy()
+    if method == "low_drawdown_then_rank_top5":
+        return candidates.sort_values(["drawdown_rank", "avg_rank_fill", "min_rank_fill"]).head(5).copy()
+    raise ValueError(f"unknown stage2 method: {method}")
 
 
 def compare_ensemble_trials(window_maps: dict[str, dict[str, pd.DataFrame]]) -> pd.DataFrame:
@@ -183,13 +363,12 @@ def compare_ensemble_trials(window_maps: dict[str, dict[str, pd.DataFrame]]) -> 
             counts_by_method: dict[str, list[int]] = {key: [] for key in returns_by_method}
             for window in common_windows:
                 frames = [window_maps[label][window].sort_values("rank") for label in selected_labels]
-                base = frames[0]
                 union = sorted(set().union(*(set(frame.head(5)["stock_id"]) for frame in frames)))
-                union_frame = base[base["stock_id"].isin(union)]
+                candidates = candidate_frame(frames)
+                union_frame = candidates[candidates["stock_id"].isin(union)]
                 returns_by_method["top5_union_equal"].append(float(union_frame["target_return"].mean()))
                 counts_by_method["top5_union_equal"].append(int(len(union_frame)))
 
-                candidates = candidate_frame(frames)
                 for method, output_name in [
                     ("avg_rank", "avg_rank_top5"),
                     ("min_rank", "min_rank_top5"),
@@ -215,6 +394,134 @@ def compare_ensemble_trials(window_maps: dict[str, dict[str, pd.DataFrame]]) -> 
     return pd.DataFrame(rows)
 
 
+def compare_stage2_rerank_trials(
+    experiment_dirs: dict[str, Path],
+    window_maps: dict[str, dict[str, pd.DataFrame]],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    rows = []
+    candidate_rows = []
+    labels = list(window_maps)
+    common_windows = align_windows(window_maps)
+
+    for pair_size in range(2, len(labels) + 1):
+        for selected_labels in itertools.combinations(labels, pair_size):
+            experiment_key = "+".join(selected_labels)
+            base_label = selected_labels[0]
+            for window in common_windows:
+                frames = [window_maps[label][window].sort_values("rank") for label in selected_labels]
+                recent_metrics = stock_recent_metrics(window_train_data_path(experiment_dirs[base_label], window))
+                candidates = union_top5_candidates(frames, recent_metrics)
+                if candidates.empty:
+                    continue
+
+                single_returns = {
+                    label: float(frame.sort_values("rank").head(5)["target_return"].mean())
+                    for label, frame in zip(selected_labels, frames)
+                }
+                first_single_return = single_returns[base_label]
+                best_single_return = max(single_returns.values())
+                union_return = float(candidates["target_return"].mean())
+                total_negative_in_union = int((candidates["target_return"] < 0).sum())
+
+                for method in STAGE2_METHODS:
+                    selected = select_stage2_candidates(candidates, method)
+                    selected_ids = set(selected["stock_id"])
+                    removed = candidates[~candidates["stock_id"].isin(selected_ids)]
+                    selected_return = float(selected["target_return"].mean()) if len(selected) else 0.0
+                    selected_negative_count = int((selected["target_return"] < 0).sum())
+                    removed_negative_count = int((removed["target_return"] < 0).sum())
+                    removed_negative_share = (
+                        removed_negative_count / total_negative_in_union
+                        if total_negative_in_union
+                        else 0.0
+                    )
+
+                    rows.append(
+                        {
+                            "experiments": experiment_key,
+                            "window": window,
+                            "method": method,
+                            "selected_return": selected_return,
+                            "union_return": union_return,
+                            "first_single_return": first_single_return,
+                            "best_single_return": best_single_return,
+                            "delta_vs_union": selected_return - union_return,
+                            "delta_vs_first": selected_return - first_single_return,
+                            "delta_vs_best_single": selected_return - best_single_return,
+                            "selected_count": int(len(selected)),
+                            "union_count": int(len(candidates)),
+                            "selected_negative_count": selected_negative_count,
+                            "removed_negative_count": removed_negative_count,
+                            "total_negative_in_union": total_negative_in_union,
+                            "removed_negative_share": removed_negative_share,
+                            "selected_avg_risk_score": float(selected["risk_score"].mean()) if len(selected) else 0.0,
+                            "union_avg_risk_score": float(candidates["risk_score"].mean()),
+                            "selected_stocks": ",".join(selected["stock_id"]),
+                            "removed_stocks": ",".join(removed["stock_id"]),
+                        }
+                    )
+
+                    for row in candidates.to_dict(orient="records"):
+                        candidate_rows.append(
+                            {
+                                "experiments": experiment_key,
+                                "window": window,
+                                "method": method,
+                                "stock_id": row["stock_id"],
+                                "stock_prefix": row["stock_prefix"],
+                                "selected": row["stock_id"] in selected_ids,
+                                "target_return": row["target_return"],
+                                "top5_borda": row["top5_borda"],
+                                "avg_rank_fill": row["avg_rank_fill"],
+                                "min_rank_fill": row["min_rank_fill"],
+                                "risk_score": row["risk_score"],
+                                "volatility_20_rank": row["volatility_20_rank"],
+                                "overheat_rank": row["overheat_rank"],
+                                "drawdown_rank": row["drawdown_rank"],
+                                "recent_return_5": row["recent_return_5"],
+                                "recent_return_10": row["recent_return_10"],
+                                "recent_return_20": row["recent_return_20"],
+                                "volatility_20": row["volatility_20"],
+                                "max_drawdown_20": row["max_drawdown_20"],
+                            }
+                        )
+
+    windows = pd.DataFrame(rows)
+    candidates = pd.DataFrame(candidate_rows)
+    if windows.empty:
+        return pd.DataFrame(), windows, candidates
+
+    summary_rows = []
+    for (experiment_key, method), group in windows.groupby(["experiments", "method"], sort=False):
+        summary_rows.append(
+            {
+                "experiments": experiment_key,
+                "method": method,
+                "window_count": int(len(group)),
+                "mean_return": float(group["selected_return"].mean()),
+                "min_return": float(group["selected_return"].min()),
+                "positive_windows": int((group["selected_return"] > 0).sum()),
+                "mean_union_return": float(group["union_return"].mean()),
+                "mean_first_single_return": float(group["first_single_return"].mean()),
+                "mean_best_single_return": float(group["best_single_return"].mean()),
+                "mean_delta_vs_union": float(group["delta_vs_union"].mean()),
+                "better_than_union_windows": int((group["delta_vs_union"] > 0).sum()),
+                "mean_delta_vs_first": float(group["delta_vs_first"].mean()),
+                "better_than_first_windows": int((group["delta_vs_first"] > 0).sum()),
+                "mean_delta_vs_best_single": float(group["delta_vs_best_single"].mean()),
+                "better_than_best_single_windows": int((group["delta_vs_best_single"] > 0).sum()),
+                "mean_selected_risk_score": float(group["selected_avg_risk_score"].mean()),
+                "mean_union_risk_score": float(group["union_avg_risk_score"].mean()),
+                "mean_selected_negative_count": float(group["selected_negative_count"].mean()),
+                "mean_removed_negative_count": float(group["removed_negative_count"].mean()),
+                "mean_total_negative_in_union": float(group["total_negative_in_union"].mean()),
+                "mean_removed_negative_share": float(group["removed_negative_share"].mean()),
+            }
+        )
+    summary = pd.DataFrame(summary_rows)
+    return summary, windows, candidates
+
+
 def write_readme(output_dir: Path, experiments: list[Path]) -> None:
     lines = [
         "# Candidate Pool Analysis",
@@ -235,9 +542,13 @@ def write_readme(output_dir: Path, experiments: list[Path]) -> None:
             "- `window_metrics.csv`: raw window-level diagnostic rows.",
             "- `overlap.csv`: topK overlap between experiment pairs.",
             "- `ensemble_trials.csv`: diagnostic-only candidate pool combination trials.",
+            "- `stage2_rerank_trials.csv`: diagnostic-only two-stage risk reranking summary.",
+            "- `stage2_rerank_windows.csv`: window-level two-stage reranking results.",
+            "- `stage2_rerank_candidates.csv`: candidate-level risk signals and selections.",
             "",
             "`top5_union_equal` can include more than five candidates and is not a valid submission by itself.",
             "It only measures whether the union candidate pool contains useful signal.",
+            "Stage2 risk signals are calculated from each window's train_until_as_of data only.",
         ]
     )
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -268,6 +579,7 @@ def main() -> None:
 
     summaries = {experiment_label(path): read_summary(path) for path in experiments}
     window_maps = {experiment_label(path): read_window_diagnostics(path) for path in experiments}
+    experiment_dirs = {experiment_label(path): path for path in experiments}
 
     summary_rows = [scalar_summary(path, summaries[experiment_label(path)]) for path in experiments]
     pd.DataFrame(summary_rows).to_csv(output_dir / "summary.csv", index=False)
@@ -275,6 +587,10 @@ def main() -> None:
     if len(experiments) >= 2:
         compare_overlaps(window_maps, top_ks).to_csv(output_dir / "overlap.csv", index=False)
         compare_ensemble_trials(window_maps).to_csv(output_dir / "ensemble_trials.csv", index=False)
+        stage2_summary, stage2_windows, stage2_candidates = compare_stage2_rerank_trials(experiment_dirs, window_maps)
+        stage2_summary.to_csv(output_dir / "stage2_rerank_trials.csv", index=False)
+        stage2_windows.to_csv(output_dir / "stage2_rerank_windows.csv", index=False)
+        stage2_candidates.to_csv(output_dir / "stage2_rerank_candidates.csv", index=False)
     write_readme(output_dir, experiments)
 
     print(f"analysis written to: {output_dir.relative_to(REPO_ROOT)}")
