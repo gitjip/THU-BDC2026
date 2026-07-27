@@ -57,6 +57,7 @@ sh tune.sh quick --skip-final --resume
 | `balanced` | 常规调参 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
 | `noid` | 去股票编号对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
 | `noid-rank` | 去编号+横截面rank | 3 | 39(no instrument)+rank | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-replace` | 去编号+rank替代绝对量价 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
 | `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
@@ -64,11 +65,13 @@ sh tune.sh quick --skip-final --resume
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-rank`、`noid-stable`、`noid-full`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-rank`、`noid-rank-replace`、`noid-stable`、`noid-full`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
 
 `noid` 是 `balanced` 的特征对照：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。
 
 `noid-rank` 是 `noid` 的横截面特征对照：默认 `BDC_USE_CROSS_SECTIONAL_RANKS=1`，会把若干收益、量能、波动和技术指标转成当日百分位排名特征，新增列名以 `_cs_rank` 结尾。它用于判断相对强弱特征是否能提升泛化。
+
+`noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。它用于判断 `v1.3.0` 失败是否来自 rank 方向本身，还是来自“追加重复特征”带来的噪声。
 
 `noid-stable` 是 `noid` 的正则化对照：继续移除 `instrument`，同时设置 `dropout=0.2`、`weight_decay=1e-4`。它用于检查 `noid` 倾向高波动股票的问题是否能通过更强正则化缓解。
 
@@ -82,7 +85,13 @@ sh tune.sh quick --skip-final --resume
 
 `v1.2.15 balanced` 与 `v1.2.13 noid` 的 12 窗口严格对照显示，移除 `instrument` 后均值和多数窗口表现更好。`v1.3.0 noid-rank` 最近 3 窗口均值明显变差，因此不要直接扩到 12 窗口。
 
-如果继续 rank 方向，先新建更小的 rank 特征实验，例如只保留收益和换手率相关 rank；不要复用 `v1.3.0` 直接 `--resume`。
+如果继续 rank 方向，先跑 `noid-rank-replace` 的最近 3 个窗口，不要复用 `v1.3.0` 直接 `--resume`：
+
+```bash
+sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
+```
+
+如果它仍明显弱于同窗口 `noid`，下一步再考虑更小的 rank 特征组，例如只保留收益和换手率相关 rank。
 
 比较时优先看：
 
@@ -106,6 +115,7 @@ sh tune.sh v1.2.0 --windows 5
 sh tune.sh v1.2.0 --windows 5 --step-days 5
 sh tune.sh v1.2.0 --data-file data/stock_data.csv
 sh tune.sh v1.3.0 noid-rank --windows 3 --skip-final
+sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final
 sh tune.sh v1.2.14 noid-full --windows 3 --skip-final
 sh tune.sh v1.2.0 large --windows 3

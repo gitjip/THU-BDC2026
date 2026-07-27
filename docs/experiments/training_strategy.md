@@ -102,6 +102,18 @@ Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top
 
 当前结论：不要把 `v1.3.0 noid-rank` 直接扩到 12 窗口。横截面 rank 方向仍可能有价值，但第一版“追加 13 个 rank 特征”的方式可能引入了噪声或重复信号。后续若继续 rank 方向，应改成更小的特征组，或尝试用 rank 替代部分原始量价特征，而不是简单追加。
 
+下一步优先测 `noid-rank-replace`，而不是继续追加 rank。它只把绝对量价尺度强、容易随市场状态漂移的列替换为当日横截面百分位排名，保留收益率、换手率、RSI/KDJ、波动率等原始比例或技术指标。这样输入维度基本不变，能更清楚地判断“rank 化绝对尺度”是否有收益。
+
+当前替换列为：`开盘`、`收盘`、`最高`、`最低`、`成交量`、`成交额`、`涨跌额`、`sma_5`、`sma_20`、`ema_12`、`ema_26`、`ema_60`、`boll_mid`、`boll_std`、`atr_14`、`obv`、`volume_ma_5`、`volume_ma_20`、`high_low_spread`、`open_close_spread`、`high_close_spread`、`low_close_spread`。
+
+推荐先跑最近 3 个窗口：
+
+```bash
+sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
+```
+
+如果最近 3 个窗口不能至少接近 `v1.2.8/v1.2.13 noid` 的同窗口结果，就不应扩到 12 窗口。
+
 ## 10. 当前策略
 
 训练脚本现在默认使用：
@@ -192,6 +204,14 @@ sh tune.sh v1.3.0 noid-rank --windows 3 --skip-final
 ```
 
 `noid-rank` 基于 `noid`，继续移除 `instrument`，默认开启 `BDC_USE_CROSS_SECTIONAL_RANKS=1`，并把 epoch 上限设为 30 以贴近 `v1.2.13` 严格对照。
+
+如果要测试用 rank 替代绝对量价尺度特征，用 `noid-rank-replace` 档位：
+
+```bash
+sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
+```
+
+`noid-rank-replace` 仍基于 `noid`，但设置 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`。它不把所有 rank 列简单追加到输入后面，而是用 `_cs_rank` 列替换部分原始绝对量价列，用于降低重复信号和非平稳尺度噪声。
 
 `balanced`、`noid`、`smooth` 和 `stable` 的 epoch 上限设为 15、早停耐心值设为 5。这个上限比最初的 5 轮更接近 `large`，能避免分数平滑增长时被硬截断；同时模型仍比 `large` 小，单个 epoch 更快。如果日志显示大多数窗口长期在第 3 到第 5 轮早停，说明上限不是瓶颈；如果最佳 epoch 多次出现在第 12 轮以后，再考虑把上限提高到 20。`noid-full` 为完整数据实验，epoch 上限单独设为 30，但仍保留早停。
 

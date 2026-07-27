@@ -26,8 +26,26 @@ def _env_float(name, default):
 fast_dev_mode = _env_bool('BDC_FAST_DEV', False)
 sequence_length = _env_int('BDC_SEQUENCE_LENGTH', 30 if fast_dev_mode else 60)
 feature_num = os.environ.get('BDC_FEATURE_NUM', '39' if fast_dev_mode else '158+39')
-use_cross_sectional_rank_features = _env_bool('BDC_USE_CROSS_SECTIONAL_RANKS', False)
-feature_dir_label = f'{feature_num}_rank' if use_cross_sectional_rank_features else feature_num
+use_cross_sectional_rank_features_flag = _env_bool('BDC_USE_CROSS_SECTIONAL_RANKS', False)
+rank_mode_value = os.environ.get('BDC_CROSS_SECTIONAL_RANK_MODE')
+if rank_mode_value in (None, ''):
+    cross_sectional_rank_mode = 'append' if use_cross_sectional_rank_features_flag else 'off'
+else:
+    cross_sectional_rank_mode = rank_mode_value.strip().lower()
+if cross_sectional_rank_mode in {'0', 'false', 'none'}:
+    cross_sectional_rank_mode = 'off'
+if cross_sectional_rank_mode == 'add':
+    cross_sectional_rank_mode = 'append'
+if cross_sectional_rank_mode == 'substitute':
+    cross_sectional_rank_mode = 'replace'
+if cross_sectional_rank_mode not in {'off', 'append', 'replace'}:
+    raise ValueError(f"Unsupported BDC_CROSS_SECTIONAL_RANK_MODE: {cross_sectional_rank_mode}")
+use_cross_sectional_rank_features = cross_sectional_rank_mode != 'off'
+if use_cross_sectional_rank_features:
+    rank_label = 'rank' if cross_sectional_rank_mode == 'append' else f'rank_{cross_sectional_rank_mode}'
+    feature_dir_label = f'{feature_num}_{rank_label}'
+else:
+    feature_dir_label = feature_num
 output_dir_prefix = 'debug_' if fast_dev_mode else ''
 config = {
     'sequence_length': sequence_length,   # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
@@ -60,6 +78,7 @@ config = {
     'dropout': _env_float('BDC_DROPOUT', 0.1),
     'use_instrument_feature': _env_bool('BDC_USE_INSTRUMENT_FEATURE', True),
     'use_cross_sectional_rank_features': use_cross_sectional_rank_features,
+    'cross_sectional_rank_mode': cross_sectional_rank_mode,
     'feature_num': feature_num,
     'max_grad_norm': 5.0,
     'enable_grad_clip': _env_bool('BDC_GRAD_CLIP', True),

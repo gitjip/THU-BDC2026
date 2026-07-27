@@ -20,7 +20,7 @@ from data_utils import (
 	setup_logging,
 )
 from model import StockTransformer
-from utils import add_cross_sectional_rank_features, engineer_features_39, engineer_features_158plus39
+from utils import apply_cross_sectional_rank_features, engineer_features_39, engineer_features_158plus39
 
 logger = logging.getLogger(__name__)
 
@@ -138,9 +138,18 @@ def preprocess_predict_data(df, stockid2idx):
 	processed['instrument'] = processed['instrument'].astype(np.int64)
 	processed['日期'] = pd.to_datetime(processed['日期'])
 	if config.get('use_cross_sectional_rank_features', False):
-		processed, rank_feature_columns = add_cross_sectional_rank_features(processed)
-		feature_columns = feature_columns + [column for column in rank_feature_columns if column not in feature_columns]
-		logger.info("预测集: 已添加横截面 rank 特征 %s 个", len(rank_feature_columns))
+		rank_mode = config.get('cross_sectional_rank_mode', 'append')
+		processed, feature_columns, rank_feature_columns = apply_cross_sectional_rank_features(
+			processed,
+			feature_columns,
+			mode=rank_mode,
+		)
+		logger.info(
+			"预测集: 已应用横截面 rank 特征 mode=%s, rank列=%s, 输入特征=%s",
+			rank_mode,
+			len(rank_feature_columns),
+			len(feature_columns),
+		)
 	if not config.get('use_instrument_feature', True):
 		logger.info("预测集: 已从输入特征中移除 instrument，股票代码仅用于分组和输出")
 

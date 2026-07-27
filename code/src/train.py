@@ -11,7 +11,7 @@ from config import config
 from model import StockTransformer
 from utils import engineer_features_39, engineer_features_158plus39
 from utils import create_ranking_dataset_vectorized
-from utils import add_cross_sectional_rank_features
+from utils import apply_cross_sectional_rank_features
 import joblib
 import os
 import json
@@ -117,9 +117,19 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
     processed['instrument'] = processed['instrument'].astype(np.int64)
 
     if config.get('use_cross_sectional_rank_features', False):
-        processed, rank_feature_columns = add_cross_sectional_rank_features(processed)
-        feature_columns = feature_columns + [column for column in rank_feature_columns if column not in feature_columns]
-        logger.info("%s: 已添加横截面 rank 特征 %s 个", desc, len(rank_feature_columns))
+        rank_mode = config.get('cross_sectional_rank_mode', 'append')
+        processed, feature_columns, rank_feature_columns = apply_cross_sectional_rank_features(
+            processed,
+            feature_columns,
+            mode=rank_mode,
+        )
+        logger.info(
+            "%s: 已应用横截面 rank 特征 mode=%s, rank列=%s, 输入特征=%s",
+            desc,
+            rank_mode,
+            len(rank_feature_columns),
+            len(feature_columns),
+        )
 
     processed = _build_label_and_clean(processed, drop_small_open=drop_small_open)
     if not config.get('use_instrument_feature', True):

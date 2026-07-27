@@ -29,6 +29,31 @@ CROSS_SECTIONAL_RANK_BASE_COLUMNS = [
     'atr_14',
 ]
 
+CROSS_SECTIONAL_RANK_REPLACE_COLUMNS = [
+    '开盘',
+    '收盘',
+    '最高',
+    '最低',
+    '成交量',
+    '成交额',
+    '涨跌额',
+    'sma_5',
+    'sma_20',
+    'ema_12',
+    'ema_26',
+    'ema_60',
+    'boll_mid',
+    'boll_std',
+    'atr_14',
+    'obv',
+    'volume_ma_5',
+    'volume_ma_20',
+    'high_low_spread',
+    'open_close_spread',
+    'high_close_spread',
+    'low_close_spread',
+]
+
 
 def cross_sectional_rank_feature_names(columns=None):
     source_columns = columns or CROSS_SECTIONAL_RANK_BASE_COLUMNS
@@ -56,6 +81,59 @@ def add_cross_sectional_rank_features(df, columns=None):
         added_columns.append(rank_column)
 
     return result, added_columns
+
+
+def apply_cross_sectional_rank_features(df, feature_columns, mode='append', columns=None):
+    """
+    Apply cross-sectional rank features and return the updated feature list.
+
+    append: keep raw features and append rank columns.
+    replace: keep the same feature count where possible by replacing selected
+    raw absolute price/volume columns with their rank columns.
+    """
+    mode = (mode or 'off').strip().lower()
+    if mode in {'0', 'false', 'none'}:
+        mode = 'off'
+    if mode == 'add':
+        mode = 'append'
+    if mode == 'substitute':
+        mode = 'replace'
+
+    if mode == 'off':
+        return df.copy(), list(feature_columns), []
+    if mode not in {'append', 'replace'}:
+        raise ValueError(f"Unsupported cross-sectional rank mode: {mode}")
+
+    source_columns = columns
+    if source_columns is None:
+        source_columns = (
+            CROSS_SECTIONAL_RANK_REPLACE_COLUMNS
+            if mode == 'replace'
+            else CROSS_SECTIONAL_RANK_BASE_COLUMNS
+        )
+
+    ranked, added_columns = add_cross_sectional_rank_features(df, source_columns)
+    if mode == 'append':
+        updated_columns = list(feature_columns)
+        updated_columns.extend(column for column in added_columns if column not in updated_columns)
+        return ranked, updated_columns, added_columns
+
+    rank_column_by_source = {
+        column: f'{column}_cs_rank'
+        for column in source_columns
+    }
+    added_column_set = set(added_columns)
+    updated_columns = []
+    for column in feature_columns:
+        rank_column = rank_column_by_source.get(column)
+        if rank_column in added_column_set:
+            replacement = rank_column
+        else:
+            replacement = column
+        if replacement not in updated_columns:
+            updated_columns.append(replacement)
+
+    return ranked, updated_columns, added_columns
 
 
 # 特征工程

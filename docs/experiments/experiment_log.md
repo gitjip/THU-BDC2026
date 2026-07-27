@@ -10,6 +10,7 @@
 - 移除 `instrument` 应默认保留：`v1.2.13 noid` 明显好于 `v1.2.15 balanced`。
 - 完整数据训练暂不值得扩跑：`v1.2.14 noid-full` 显著变慢，3 窗口均值没有改善。
 - 第一版横截面 rank 特征不应扩跑：`v1.3.0 noid-rank` 最近 3 窗口明显差于 noid。
+- rank 方向下一步不再简单追加特征，改测 `noid-rank-replace`：用 rank 替换绝对量价尺度列，先跑最近 3 个窗口。
 
 ## 版本记录
 
