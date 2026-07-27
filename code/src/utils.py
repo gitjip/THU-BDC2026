@@ -54,6 +54,17 @@ CROSS_SECTIONAL_RANK_REPLACE_COLUMNS = [
     'low_close_spread',
 ]
 
+MARKET_RELATIVE_FEATURE_SPECS = [
+    ('return_1', 'mkt_rel_return_1', 'mean_diff'),
+    ('return_5', 'mkt_rel_return_5', 'mean_diff'),
+    ('return_10', 'mkt_rel_return_10', 'mean_diff'),
+    ('涨跌幅', 'mkt_rel_pct_chg', 'mean_diff'),
+    ('换手率', 'mkt_rel_turnover', 'median_ratio'),
+    ('volume_ratio', 'mkt_rel_volume_ratio', 'median_ratio'),
+    ('volatility_10', 'mkt_rel_volatility_10', 'median_ratio'),
+    ('volatility_20', 'mkt_rel_volatility_20', 'median_ratio'),
+]
+
 
 def cross_sectional_rank_feature_names(columns=None):
     source_columns = columns or CROSS_SECTIONAL_RANK_BASE_COLUMNS
@@ -134,6 +145,52 @@ def apply_cross_sectional_rank_features(df, feature_columns, mode='append', colu
             updated_columns.append(replacement)
 
     return ranked, updated_columns, added_columns
+
+
+def market_relative_feature_names():
+    return [target for _, target, _ in MARKET_RELATIVE_FEATURE_SPECS]
+
+
+def add_market_relative_features(df, specs=None):
+    """Add per-date market-relative features from existing per-stock indicators."""
+    if '日期' not in df.columns:
+        raise ValueError("市场相对特征需要 日期 列")
+
+    result = df.copy()
+    source_specs = specs or MARKET_RELATIVE_FEATURE_SPECS
+    dates = result['日期']
+    added_columns = []
+
+    for source_column, target_column, method in source_specs:
+        if source_column not in result.columns:
+            continue
+
+        values = pd.to_numeric(result[source_column], errors='coerce')
+        grouped = values.groupby(dates)
+        if method == 'mean_diff':
+            relative_values = values - grouped.transform('mean')
+        elif method == 'median_ratio':
+            baseline = grouped.transform('median')
+            baseline = baseline.where(baseline.abs() > 1e-12)
+            relative_values = values / baseline - 1.0
+        else:
+            raise ValueError(f"Unsupported market-relative method: {method}")
+
+        result[target_column] = (
+            relative_values.replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        added_columns.append(target_column)
+
+    return result, added_columns
+
+
+def apply_market_relative_features(df, feature_columns):
+    processed, added_columns = add_market_relative_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
 
 
 # 特征工程

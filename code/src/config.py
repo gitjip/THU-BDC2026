@@ -26,6 +26,7 @@ def _env_float(name, default):
 fast_dev_mode = _env_bool('BDC_FAST_DEV', False)
 sequence_length = _env_int('BDC_SEQUENCE_LENGTH', 30 if fast_dev_mode else 60)
 feature_num = os.environ.get('BDC_FEATURE_NUM', '39' if fast_dev_mode else '158+39')
+use_market_relative_features = _env_bool('BDC_USE_MARKET_RELATIVE_FEATURES', False)
 use_cross_sectional_rank_features_flag = _env_bool('BDC_USE_CROSS_SECTIONAL_RANKS', False)
 rank_mode_value = os.environ.get('BDC_CROSS_SECTIONAL_RANK_MODE')
 if rank_mode_value in (None, ''):
@@ -41,11 +42,12 @@ if cross_sectional_rank_mode == 'substitute':
 if cross_sectional_rank_mode not in {'off', 'append', 'replace'}:
     raise ValueError(f"Unsupported BDC_CROSS_SECTIONAL_RANK_MODE: {cross_sectional_rank_mode}")
 use_cross_sectional_rank_features = cross_sectional_rank_mode != 'off'
+feature_dir_label = feature_num
 if use_cross_sectional_rank_features:
     rank_label = 'rank' if cross_sectional_rank_mode == 'append' else f'rank_{cross_sectional_rank_mode}'
-    feature_dir_label = f'{feature_num}_{rank_label}'
-else:
-    feature_dir_label = feature_num
+    feature_dir_label = f'{feature_dir_label}_{rank_label}'
+if use_market_relative_features:
+    feature_dir_label = f'{feature_dir_label}_mktrel'
 output_dir_prefix = 'debug_' if fast_dev_mode else ''
 config = {
     'sequence_length': sequence_length,   # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
@@ -77,6 +79,7 @@ config = {
     'early_stopping_min_delta': _env_float('BDC_EARLY_STOPPING_MIN_DELTA', 1e-4),
     'dropout': _env_float('BDC_DROPOUT', 0.1),
     'use_instrument_feature': _env_bool('BDC_USE_INSTRUMENT_FEATURE', True),
+    'use_market_relative_features': use_market_relative_features,
     'use_cross_sectional_rank_features': use_cross_sectional_rank_features,
     'cross_sectional_rank_mode': cross_sectional_rank_mode,
     'feature_num': feature_num,

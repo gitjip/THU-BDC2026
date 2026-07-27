@@ -11,6 +11,7 @@ from config import config
 from model import StockTransformer
 from utils import engineer_features_39, engineer_features_158plus39
 from utils import create_ranking_dataset_vectorized
+from utils import apply_market_relative_features
 from utils import apply_cross_sectional_rank_features
 import joblib
 import os
@@ -115,6 +116,18 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
     processed['instrument'] = processed['股票代码'].map(stockid2idx)
     processed = processed.dropna(subset=['instrument']).copy()
     processed['instrument'] = processed['instrument'].astype(np.int64)
+
+    if config.get('use_market_relative_features', False):
+        processed, feature_columns, market_relative_columns = apply_market_relative_features(
+            processed,
+            feature_columns,
+        )
+        logger.info(
+            "%s: 已添加市场相对特征 %s 个，输入特征=%s",
+            desc,
+            len(market_relative_columns),
+            len(feature_columns),
+        )
 
     if config.get('use_cross_sectional_rank_features', False):
         rank_mode = config.get('cross_sectional_rank_mode', 'append')

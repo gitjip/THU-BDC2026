@@ -20,7 +20,12 @@ from data_utils import (
 	setup_logging,
 )
 from model import StockTransformer
-from utils import apply_cross_sectional_rank_features, engineer_features_39, engineer_features_158plus39
+from utils import (
+	apply_cross_sectional_rank_features,
+	apply_market_relative_features,
+	engineer_features_39,
+	engineer_features_158plus39,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +142,16 @@ def preprocess_predict_data(df, stockid2idx):
 	processed = processed.dropna(subset=['instrument']).copy()
 	processed['instrument'] = processed['instrument'].astype(np.int64)
 	processed['日期'] = pd.to_datetime(processed['日期'])
+	if config.get('use_market_relative_features', False):
+		processed, feature_columns, market_relative_columns = apply_market_relative_features(
+			processed,
+			feature_columns,
+		)
+		logger.info(
+			"预测集: 已添加市场相对特征 %s 个，输入特征=%s",
+			len(market_relative_columns),
+			len(feature_columns),
+		)
 	if config.get('use_cross_sectional_rank_features', False):
 		rank_mode = config.get('cross_sectional_rank_mode', 'append')
 		processed, feature_columns, rank_feature_columns = apply_cross_sectional_rank_features(

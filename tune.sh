@@ -37,6 +37,10 @@ case "${1:-}" in
     profile="noid"
     shift
     ;;
+  noid-marketrel|marketrel|--noid-marketrel|--marketrel)
+    profile="noid-marketrel"
+    shift
+    ;;
   noid-rank|--noid-rank)
     profile="noid-rank"
     shift
@@ -236,6 +240,39 @@ case "$profile" in
     set_default BDC_TORCH_NUM_THREADS 4
     set_default BDC_TENSORBOARD 0
     ;;
+  noid-marketrel)
+    set_default BDC_WF_WINDOWS 3
+    set_default BDC_FEATURE_NUM 39
+    set_default BDC_SEQUENCE_LENGTH 45
+    set_default BDC_TRAIN_TARGET_DAYS 60
+    set_default BDC_VAL_DAYS 5
+    set_default BDC_MAX_STOCKS_PER_DAY 120
+    set_default BDC_D_MODEL 96
+    set_default BDC_NHEAD 4
+    set_default BDC_NUM_LAYERS 2
+    set_default BDC_DIM_FEEDFORWARD 192
+    set_default BDC_BATCH_SIZE 4
+    set_default BDC_NUM_EPOCHS 30
+    set_default BDC_LEARNING_RATE 3e-5
+    set_default BDC_WEIGHT_DECAY 1e-5
+    set_default BDC_DROPOUT 0.1
+    set_default BDC_USE_INSTRUMENT_FEATURE 0
+    set_default BDC_USE_MARKET_RELATIVE_FEATURES 1
+    set_default BDC_OPTIMIZER adamw
+    set_default BDC_LOOKAHEAD_K 5
+    set_default BDC_LOOKAHEAD_ALPHA 0.5
+    set_default BDC_LR_SCHEDULER plateau
+    set_default BDC_LR_PATIENCE 1
+    set_default BDC_LR_FACTOR 0.5
+    set_default BDC_LR_THRESHOLD 1e-4
+    set_default BDC_MIN_LR 1e-6
+    set_default BDC_EARLY_STOPPING_PATIENCE 5
+    set_default BDC_EARLY_STOPPING_MIN_DELTA 1e-4
+    set_default BDC_GRAD_CLIP 1
+    set_default BDC_NUM_PROCESSES 6
+    set_default BDC_TORCH_NUM_THREADS 4
+    set_default BDC_TENSORBOARD 0
+    ;;
   noid-stable)
     set_default BDC_WF_WINDOWS 3
     set_default BDC_FEATURE_NUM 39
@@ -420,12 +457,13 @@ case "$profile" in
     set_default BDC_TENSORBOARD 0
     ;;
   *)
-    echo "未知 tune profile: $profile，可选 quick、balanced、noid、noid-rank、noid-rank-replace、noid-stable、noid-full、smooth、stable、large、full。" >&2
+    echo "未知 tune profile: $profile，可选 quick、balanced、noid、noid-marketrel、noid-rank、noid-rank-replace、noid-stable、noid-full、smooth、stable、large、full。" >&2
     exit 2
     ;;
 esac
 
 set_default BDC_USE_CROSS_SECTIONAL_RANKS 0
+set_default BDC_USE_MARKET_RELATIVE_FEATURES 0
 
 if [ -x ".venv/bin/python" ]; then
   exec .venv/bin/python code/src/walk_forward.py "$version" "$@"
