@@ -5,3 +5,4 @@
 - `contest/`：赛事方原始通知、规则和提交说明。
 
 根目录 [GUIDE.md](../GUIDE.md) 是最短入口索引。
+根目录旧版项目概览已迁移到 [workflows/project_overview.md](workflows/project_overview.md)。
