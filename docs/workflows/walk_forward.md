@@ -131,6 +131,14 @@ sh tune.sh v1.2.0 large --windows 3
 sh tune.sh v1.2.0 full --windows 3
 ```
 
+已有实验补完预测诊断后，可以比较候选池：
+
+```bash
+.venv/bin/python code/src/compare_candidate_pools.py experiments/v1.2.13 experiments/v1.3.2
+```
+
+输出默认在 `experiments/analysis/` 下，只用于本地复盘，不影响提交结果。
+
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 
 `manifest.json` 中 `tune_env` 记录的是 profile 写入的环境变量；如果命令行传了 `--windows 12` 这类参数，实际生效值看 `walk_forward_args` 和 `windows` 列表。`summary.csv` 中的行数也是实际完成窗口数。
