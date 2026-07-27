@@ -12,6 +12,52 @@ logger = logging.getLogger(__name__)
 def show_progress_bar():
     return sys.stderr.isatty()
 
+
+CROSS_SECTIONAL_RANK_BASE_COLUMNS = [
+    '涨跌幅',
+    '换手率',
+    '成交额',
+    '成交量',
+    '振幅',
+    'return_1',
+    'return_5',
+    'return_10',
+    'volume_ratio',
+    'volatility_10',
+    'volatility_20',
+    'rsi',
+    'atr_14',
+]
+
+
+def cross_sectional_rank_feature_names(columns=None):
+    source_columns = columns or CROSS_SECTIONAL_RANK_BASE_COLUMNS
+    return [f'{column}_cs_rank' for column in source_columns]
+
+
+def add_cross_sectional_rank_features(df, columns=None):
+    """Add per-date percentile ranks so the model sees relative strength."""
+    if '日期' not in df.columns:
+        raise ValueError("横截面 rank 特征需要 日期 列")
+
+    result = df.copy()
+    source_columns = columns or CROSS_SECTIONAL_RANK_BASE_COLUMNS
+    available_columns = [column for column in source_columns if column in result.columns]
+    if not available_columns:
+        return result, []
+
+    dates = result['日期']
+    added_columns = []
+    for column in available_columns:
+        rank_column = f'{column}_cs_rank'
+        values = pd.to_numeric(result[column], errors='coerce')
+        ranks = values.groupby(dates).rank(method='average', pct=True)
+        result[rank_column] = ranks.fillna(0.5).astype(float)
+        added_columns.append(rank_column)
+
+    return result, added_columns
+
+
 # 特征工程
 def _rolling_linear_regression(x, y):
     x = np.vstack([np.ones(len(x)), x]).T

@@ -350,6 +350,7 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
         "BDC_WEIGHT_DECAY",
         "BDC_DROPOUT",
         "BDC_USE_INSTRUMENT_FEATURE",
+        "BDC_USE_CROSS_SECTIONAL_RANKS",
         "BDC_OPTIMIZER",
         "BDC_LOOKAHEAD_K",
         "BDC_LOOKAHEAD_ALPHA",

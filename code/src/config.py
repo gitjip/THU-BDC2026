@@ -26,6 +26,8 @@ def _env_float(name, default):
 fast_dev_mode = _env_bool('BDC_FAST_DEV', False)
 sequence_length = _env_int('BDC_SEQUENCE_LENGTH', 30 if fast_dev_mode else 60)
 feature_num = os.environ.get('BDC_FEATURE_NUM', '39' if fast_dev_mode else '158+39')
+use_cross_sectional_rank_features = _env_bool('BDC_USE_CROSS_SECTIONAL_RANKS', False)
+feature_dir_label = f'{feature_num}_rank' if use_cross_sectional_rank_features else feature_num
 output_dir_prefix = 'debug_' if fast_dev_mode else ''
 config = {
     'sequence_length': sequence_length,   # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
@@ -57,6 +59,7 @@ config = {
     'early_stopping_min_delta': _env_float('BDC_EARLY_STOPPING_MIN_DELTA', 1e-4),
     'dropout': _env_float('BDC_DROPOUT', 0.1),
     'use_instrument_feature': _env_bool('BDC_USE_INSTRUMENT_FEATURE', True),
+    'use_cross_sectional_rank_features': use_cross_sectional_rank_features,
     'feature_num': feature_num,
     'max_grad_norm': 5.0,
     'enable_grad_clip': _env_bool('BDC_GRAD_CLIP', True),
@@ -69,7 +72,7 @@ config = {
     'base_weight': 1.0, # 非top-k样本权重
     'top5_weight': 2.0, # top-5样本权重（应大于base_weight）
 
-    'output_dir': os.environ.get('BDC_OUTPUT_DIR', f'./model/{output_dir_prefix}{sequence_length}_{feature_num}'),
+    'output_dir': os.environ.get('BDC_OUTPUT_DIR', f'./model/{output_dir_prefix}{sequence_length}_{feature_dir_label}'),
     'data_path': './data',
     'stock_data_file': None,  # 默认自动寻找 data/stock_data.csv 或 data/stock_data
     'prediction_output_path': './output/result.csv',
