@@ -95,13 +95,9 @@ sh tune.sh quick --skip-final --resume
 
 `v1.3.3 noid-marketrel` 已跑完最近 3 窗口，均值约 `-0.036034`，全弱于同窗口 noid，不建议扩跑 12 窗口。
 
-下一步优先跑 `noid-rank-lite` 最近 3 窗口：
+`v1.3.4 noid-rank-lite` 已跑完最近 3 窗口，均值约 `-0.018936`，只在 `1/3` 个窗口好于 noid；它比 marketrel 好，但仍弱于同窗口 noid 和 22 列 `noid-rank-replace`，不建议扩跑 12 窗口。
 
-```bash
-sh tune.sh v1.3.4 noid-rank-lite --windows 3 --skip-final
-```
-
-如果继续 rank 方向，先看 lite 是否优于 noid；不要简单扩展 `v1.3.0` 的追加式 rank。
+如果继续 rank 方向，不要再简单拆替换列或扩展追加式 rank；应先明确新的金融假设，否则容易只是改变选股池但降低外部窗口收益。
 
 比较时优先看：
 
