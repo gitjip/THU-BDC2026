@@ -80,17 +80,9 @@ sh tune.sh quick --skip-final --resume
 
 ## 5. 下一轮推荐对照
 
-`v1.2.15 balanced` 与 `v1.2.13 noid` 的 12 窗口严格对照显示，移除 `instrument` 后均值和多数窗口表现更好。下一步优先测试 `noid-rank`，只在 `noid` 基础上增加横截面 rank 特征：
+`v1.2.15 balanced` 与 `v1.2.13 noid` 的 12 窗口严格对照显示，移除 `instrument` 后均值和多数窗口表现更好。`v1.3.0 noid-rank` 最近 3 窗口均值明显变差，因此不要直接扩到 12 窗口。
 
-```bash
-sh tune.sh v1.3.0 noid-rank --windows 3 --skip-final
-```
-
-如果 3 窗口不明显变差，再扩到 12 窗口：
-
-```bash
-sh tune.sh v1.3.1 noid-rank --windows 12 --skip-final
-```
+如果继续 rank 方向，先新建更小的 rank 特征实验，例如只保留收益和换手率相关 rank；不要复用 `v1.3.0` 直接 `--resume`。
 
 比较时优先看：
 
@@ -154,6 +146,7 @@ sh tune.sh v1.2.0 --resume --create-tag
 experiments/v1.2.0/
   manifest.json
   summary.csv
+  experiment_note.md
   walk_forward.log
   windows/
     window_01/
@@ -180,6 +173,7 @@ experiments/v1.2.0/
 
 - `summary.csv`：所有窗口的分数汇总；
 - `manifest.json`：版本、Git commit、数据文件、窗口计划；
+- `experiment_note.md`：本次实验的本地简要说明，包含 profile、关键配置、窗口分数和耗时；该文件在 `experiments/` 下，不提交到 Git；
 - `windows/*/metadata.json`：窗口元数据，`target_trading_dates` 是实际验证日期，`target_calendar_span_days` 应为 5；
 - `windows/*/prediction_scores.csv`：完整候选股票排名和模型分数，用于排查固定选股池；
 - `windows/*/model/final_score.txt`：该窗口训练早停位置、最佳 epoch 和最佳内部验证分数；

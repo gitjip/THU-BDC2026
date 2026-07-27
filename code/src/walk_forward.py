@@ -23,6 +23,37 @@ EXPERIMENTS_DIR = REPO_ROOT / "experiments"
 VERSION_FILE = REPO_ROOT / "VERSION"
 logger = logging.getLogger("bdc.walk_forward")
 
+PROFILE_DESCRIPTIONS = {
+    "quick": "快速调试档，小模型、小样本，用于检查流程是否跑通。",
+    "balanced": "常规调参档，保留 instrument 输入，用于和 noid 系列做对照。",
+    "noid": "去股票编号对照档，从模型输入中移除 instrument，股票代码只用于分组和输出。",
+    "noid-rank": "noid + 横截面 rank 特征，用于测试当日相对强弱特征。",
+    "noid-stable": "noid + 更强正则化，用于测试 dropout/weight_decay 是否缓解高波动偏好。",
+    "noid-full": "noid + 完整训练数据，用于测试取消训练目标日和每日股票抽样后的效果。",
+    "smooth": "Lookahead 优化器对照档，用于测试优化器抗震荡效果。",
+    "stable": "更强正则化对照档，保留 instrument 输入。",
+    "large": "慢速候选复核档，较大前馈层和更多层数。",
+    "full": "完整配置复核档，使用配置默认特征和模型设置。",
+}
+
+NOTE_CONFIG_KEYS = [
+    "BDC_TUNE_PROFILE",
+    "BDC_FEATURE_NUM",
+    "BDC_SEQUENCE_LENGTH",
+    "BDC_TRAIN_TARGET_DAYS",
+    "BDC_VAL_DAYS",
+    "BDC_MAX_STOCKS_PER_DAY",
+    "BDC_NUM_EPOCHS",
+    "BDC_LEARNING_RATE",
+    "BDC_WEIGHT_DECAY",
+    "BDC_DROPOUT",
+    "BDC_USE_INSTRUMENT_FEATURE",
+    "BDC_USE_CROSS_SECTIONAL_RANKS",
+    "BDC_OPTIMIZER",
+    "BDC_LR_SCHEDULER",
+    "BDC_EARLY_STOPPING_PATIENCE",
+]
+
 
 def format_duration(seconds: float | None) -> str:
     if seconds is None:
@@ -35,6 +66,15 @@ def format_duration(seconds: float | None) -> str:
     if minutes:
         return f"{minutes}m{seconds:02d}s"
     return f"{seconds}s"
+
+
+def format_optional_score(value) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        return f"{float(value):.6f}"
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def log_section(title: str) -> None:
@@ -258,6 +298,13 @@ def read_json(path: Path) -> dict:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def read_existing_summary(experiment_dir: Path) -> dict[str, dict]:
@@ -662,6 +709,82 @@ def write_summary(experiment_dir: Path, rows: list[dict]) -> None:
     logger.info("walk-forward 汇总已写入: %s", summary_path.relative_to(REPO_ROOT))
 
 
+def write_experiment_note(experiment_dir: Path, manifest: dict) -> None:
+    tune_env = manifest.get("tune_env") or {}
+    walk_forward_args = manifest.get("walk_forward_args") or {}
+    rows = manifest.get("window_results") or []
+    profile = tune_env.get("BDC_TUNE_PROFILE", "")
+    profile_desc = PROFILE_DESCRIPTIONS.get(profile, "自定义调参档。")
+    git_info = manifest.get("git") or {}
+
+    lines = [
+        f"# {manifest.get('version', experiment_dir.name)} 实验说明",
+        "",
+        "## 目的",
+        "",
+        f"- Profile: `{profile or 'manual'}`",
+        f"- 说明: {profile_desc}",
+        f"- Git: `{git_info.get('commit', '')}` on `{git_info.get('branch', '')}`",
+        f"- 数据: `{manifest.get('data_file', '')}`",
+        "",
+        "## 关键配置",
+        "",
+    ]
+
+    for key in NOTE_CONFIG_KEYS:
+        if key in tune_env:
+            lines.append(f"- `{key}`: `{tune_env[key]}`")
+
+    if walk_forward_args:
+        lines.extend(
+            [
+                f"- `requested_windows`: `{walk_forward_args.get('requested_windows', '')}`",
+                f"- `generated_windows`: `{walk_forward_args.get('generated_windows', '')}`",
+                f"- `step_days`: `{walk_forward_args.get('step_days', '')}`",
+                f"- `skip_final`: `{walk_forward_args.get('skip_final', '')}`",
+            ]
+        )
+
+    lines.extend(["", "## 结果", ""])
+    if rows:
+        lines.extend(
+            [
+                f"- mean score: `{format_optional_score(manifest.get('walk_forward_score_mean'))}`",
+                f"- min score: `{format_optional_score(manifest.get('walk_forward_score_min'))}`",
+                f"- max score: `{format_optional_score(manifest.get('walk_forward_score_max'))}`",
+                f"- total duration: `{manifest.get('total_duration', '')}`",
+                "",
+                "| window | target | score | train | predict |",
+                "| --- | --- | ---: | ---: | ---: |",
+            ]
+        )
+        for row in rows:
+            target = f"{row.get('target_start_date', '')} ~ {row.get('target_end_date', '')}"
+            lines.append(
+                "| {window} | {target} | {score} | {train} | {predict} |".format(
+                    window=row.get("window", ""),
+                    target=target,
+                    score=format_optional_score(row.get("score")),
+                    train=row.get("train_duration", ""),
+                    predict=row.get("predict_duration", ""),
+                )
+            )
+    else:
+        lines.append("- walk-forward 窗口尚未完成。")
+
+    final_result = manifest.get("final")
+    lines.extend(["", "## 最终模型", ""])
+    if final_result:
+        lines.append(f"- final result: `{final_result.get('prediction', '')}`")
+        lines.append(f"- published: `{final_result.get('published_prediction', '')}`")
+    else:
+        lines.append("- 未运行最终模型训练或最终预测。")
+
+    note_path = experiment_dir / "experiment_note.md"
+    note_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    logger.info("实验说明已写入: %s", display_path(note_path))
+
+
 def main() -> None:
     args = parse_args()
     validate_args(args)
@@ -765,6 +888,7 @@ def main() -> None:
     manifest["total_seconds"] = total_seconds
     manifest["total_duration"] = format_duration(total_seconds)
     write_json(experiment_dir / "manifest.json", manifest)
+    write_experiment_note(experiment_dir, manifest)
     logger.info("版本 %s 完成 | 总耗时=%s", args.version, format_duration(total_seconds))
 
 

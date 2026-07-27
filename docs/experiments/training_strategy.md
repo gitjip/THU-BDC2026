@@ -94,19 +94,13 @@ Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top
 
 当前实现的 rank 源特征包括：`涨跌幅`、`换手率`、`成交额`、`成交量`、`振幅`、`return_1`、`return_5`、`return_10`、`volume_ratio`、`volatility_10`、`volatility_20`、`rsi`、`atr_14`。对应新增特征名以 `_cs_rank` 结尾。
 
-推荐先跑：
+`v1.3.0 noid-rank` 已完成最近 3 个窗口测试，结果不理想：
 
-```bash
-sh tune.sh v1.3.0 noid-rank --windows 3 --skip-final
-```
+- 3 窗口均值约 `-0.035988`，低于同窗口 `v1.2.8/v1.2.13 noid` 的 `0.017410`；
+- 仅 1 个窗口为正；
+- 同窗口逐项比较，只在 2026-06-29 窗口略好，其余两个窗口明显变差。
 
-如果 3 窗口不明显变差，再跑 12 窗口：
-
-```bash
-sh tune.sh v1.3.1 noid-rank --windows 12 --skip-final
-```
-
-比较时以 `v1.2.13 noid` 作为主要对照，不要和 `balanced` 或 `noid-full` 混在一起下结论。
+当前结论：不要把 `v1.3.0 noid-rank` 直接扩到 12 窗口。横截面 rank 方向仍可能有价值，但第一版“追加 13 个 rank 特征”的方式可能引入了噪声或重复信号。后续若继续 rank 方向，应改成更小的特征组，或尝试用 rank 替代部分原始量价特征，而不是简单追加。
 
 ## 10. 当前策略
 
