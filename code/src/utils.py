@@ -54,6 +54,21 @@ CROSS_SECTIONAL_RANK_REPLACE_COLUMNS = [
     'low_close_spread',
 ]
 
+CROSS_SECTIONAL_RANK_REPLACE_LITE_COLUMNS = [
+    '开盘',
+    '收盘',
+    '最高',
+    '最低',
+    '成交量',
+    '成交额',
+    '涨跌额',
+]
+
+CROSS_SECTIONAL_RANK_REPLACE_COLUMN_SETS = {
+    'default': CROSS_SECTIONAL_RANK_REPLACE_COLUMNS,
+    'lite': CROSS_SECTIONAL_RANK_REPLACE_LITE_COLUMNS,
+}
+
 MARKET_RELATIVE_FEATURE_SPECS = [
     ('return_1', 'mkt_rel_return_1', 'mean_diff'),
     ('return_5', 'mkt_rel_return_5', 'mean_diff'),
@@ -94,7 +109,7 @@ def add_cross_sectional_rank_features(df, columns=None):
     return result, added_columns
 
 
-def apply_cross_sectional_rank_features(df, feature_columns, mode='append', columns=None):
+def apply_cross_sectional_rank_features(df, feature_columns, mode='append', columns=None, replace_set='default'):
     """
     Apply cross-sectional rank features and return the updated feature list.
 
@@ -117,11 +132,15 @@ def apply_cross_sectional_rank_features(df, feature_columns, mode='append', colu
 
     source_columns = columns
     if source_columns is None:
-        source_columns = (
-            CROSS_SECTIONAL_RANK_REPLACE_COLUMNS
-            if mode == 'replace'
-            else CROSS_SECTIONAL_RANK_BASE_COLUMNS
-        )
+        if mode == 'replace':
+            replace_set = (replace_set or 'default').strip().lower()
+            if replace_set in {'', 'full'}:
+                replace_set = 'default'
+            if replace_set not in CROSS_SECTIONAL_RANK_REPLACE_COLUMN_SETS:
+                raise ValueError(f"Unsupported cross-sectional rank replace set: {replace_set}")
+            source_columns = CROSS_SECTIONAL_RANK_REPLACE_COLUMN_SETS[replace_set]
+        else:
+            source_columns = CROSS_SECTIONAL_RANK_BASE_COLUMNS
 
     ranked, added_columns = add_cross_sectional_rank_features(df, source_columns)
     if mode == 'append':

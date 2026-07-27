@@ -164,6 +164,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `use_market_relative_features`：默认关闭；可用 `BDC_USE_MARKET_RELATIVE_FEATURES=1` 追加市场相对特征。
 - `use_cross_sectional_rank_features`：默认关闭；可用 `BDC_USE_CROSS_SECTIONAL_RANKS=1` 增加当日横截面百分位排名特征。
 - `cross_sectional_rank_mode`：默认 `off`；`append` 表示追加 rank 特征，`replace` 表示用 rank 替换部分原始绝对量价特征。
+- `cross_sectional_rank_replace_set`：默认 `default`；`lite` 只替换开高低收、成交量、成交额和涨跌额。
 - `stock_data_file`：默认 `None`，自动寻找数据；也可以用环境变量 `BDC_STOCK_DATA_FILE` 临时覆盖。
 
 注意：`BDC_EARLY_STOPPING_PATIENCE=0` 只表示不提前停止，训练仍会根据内部验证 `final_score` 保存 `best_model.pth`。`test.sh` 和 walk-forward 预测默认读取 `best_model.pth`，不是最后一个 epoch 的权重。如果要比较最后一轮模型，需要单独增加保存和加载 final epoch 模型的实验开关。
@@ -177,6 +178,7 @@ BDC_NUM_EPOCHS=6 BDC_EARLY_STOPPING_PATIENCE=2 sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_USE_MARKET_RELATIVE_FEATURES=1 sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_USE_CROSS_SECTIONAL_RANKS=1 sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace sh train.sh debug
+BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite sh train.sh debug
 BDC_NUM_EPOCHS=30 BDC_LR_SCHEDULER=off BDC_EARLY_STOPPING_PATIENCE=0 sh tune.sh v1.2.10 noid --skip-final
 BDC_SUBMISSION_DATE=2026-08-02 sh test.sh
 BDC_TARGET_START_DATE=2026-08-08 sh test.sh

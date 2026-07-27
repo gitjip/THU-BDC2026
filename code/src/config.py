@@ -41,10 +41,17 @@ if cross_sectional_rank_mode == 'substitute':
     cross_sectional_rank_mode = 'replace'
 if cross_sectional_rank_mode not in {'off', 'append', 'replace'}:
     raise ValueError(f"Unsupported BDC_CROSS_SECTIONAL_RANK_MODE: {cross_sectional_rank_mode}")
+cross_sectional_rank_replace_set = os.environ.get('BDC_CROSS_SECTIONAL_RANK_REPLACE_SET', 'default').strip().lower()
+if cross_sectional_rank_replace_set in {'', 'full'}:
+    cross_sectional_rank_replace_set = 'default'
+if cross_sectional_rank_replace_set not in {'default', 'lite'}:
+    raise ValueError(f"Unsupported BDC_CROSS_SECTIONAL_RANK_REPLACE_SET: {cross_sectional_rank_replace_set}")
 use_cross_sectional_rank_features = cross_sectional_rank_mode != 'off'
 feature_dir_label = feature_num
 if use_cross_sectional_rank_features:
     rank_label = 'rank' if cross_sectional_rank_mode == 'append' else f'rank_{cross_sectional_rank_mode}'
+    if cross_sectional_rank_mode == 'replace' and cross_sectional_rank_replace_set != 'default':
+        rank_label = f'{rank_label}_{cross_sectional_rank_replace_set}'
     feature_dir_label = f'{feature_dir_label}_{rank_label}'
 if use_market_relative_features:
     feature_dir_label = f'{feature_dir_label}_mktrel'
@@ -82,6 +89,7 @@ config = {
     'use_market_relative_features': use_market_relative_features,
     'use_cross_sectional_rank_features': use_cross_sectional_rank_features,
     'cross_sectional_rank_mode': cross_sectional_rank_mode,
+    'cross_sectional_rank_replace_set': cross_sectional_rank_replace_set,
     'feature_num': feature_num,
     'max_grad_norm': 5.0,
     'enable_grad_clip': _env_bool('BDC_GRAD_CLIP', True),

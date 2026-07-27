@@ -154,14 +154,17 @@ def preprocess_predict_data(df, stockid2idx):
 		)
 	if config.get('use_cross_sectional_rank_features', False):
 		rank_mode = config.get('cross_sectional_rank_mode', 'append')
+		rank_replace_set = config.get('cross_sectional_rank_replace_set', 'default')
 		processed, feature_columns, rank_feature_columns = apply_cross_sectional_rank_features(
 			processed,
 			feature_columns,
 			mode=rank_mode,
+			replace_set=rank_replace_set,
 		)
 		logger.info(
-			"预测集: 已应用横截面 rank 特征 mode=%s, rank列=%s, 输入特征=%s",
+			"预测集: 已应用横截面 rank 特征 mode=%s, replace_set=%s, rank列=%s, 输入特征=%s",
 			rank_mode,
+			rank_replace_set,
 			len(rank_feature_columns),
 			len(feature_columns),
 		)

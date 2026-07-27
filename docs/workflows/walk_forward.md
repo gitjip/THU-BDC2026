@@ -58,6 +58,7 @@ sh tune.sh quick --skip-final --resume
 | `noid` | 去股票编号对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
 | `noid-marketrel` | 去编号+市场相对特征 | 3 | 39(no instrument)+8 mktrel | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank` | 去编号+横截面rank | 3 | 39(no instrument)+rank | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-lite` | 去编号+小范围rank替代 | 3 | 39(no instrument, 7 rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-replace` | 去编号+rank替代绝对量价 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
@@ -66,13 +67,15 @@ sh tune.sh quick --skip-final --resume
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-replace`、`noid-stable`、`noid-full`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-stable`、`noid-full`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
 
 `noid` 是 `balanced` 的特征对照：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。
 
 `noid-marketrel` 是 `noid` 的市场相对特征对照：默认 `BDC_USE_MARKET_RELATIVE_FEATURES=1`，追加 8 个 `mkt_rel_*` 特征，用于判断个股是否强于同日市场整体。它不启用 rank，也不改模型结构。
 
 `noid-rank` 是 `noid` 的横截面特征对照：默认 `BDC_USE_CROSS_SECTIONAL_RANKS=1`，会把若干收益、量能、波动和技术指标转成当日百分位排名特征，新增列名以 `_cs_rank` 结尾。它用于判断相对强弱特征是否能提升泛化。
+
+`noid-rank-lite` 是 `noid-rank-replace` 的小范围版本：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`、`BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite`，只替换开高低收、成交量、成交额和涨跌额 7 个原始价量尺度列。
 
 `noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。`v1.3.2` 12 窗口几乎打平 noid，说明它比追加式 rank 合理，但暂时不作为默认主线。
 
@@ -92,7 +95,13 @@ sh tune.sh quick --skip-final --resume
 
 `v1.3.3 noid-marketrel` 已跑完最近 3 窗口，均值约 `-0.036034`，全弱于同窗口 noid，不建议扩跑 12 窗口。
 
-如果继续 rank 方向，优先缩小替换组，例如只替换开高低收和成交额，或只保留收益/换手率相关 rank，不要简单扩展 `v1.3.0` 的追加式 rank。
+下一步优先跑 `noid-rank-lite` 最近 3 窗口：
+
+```bash
+sh tune.sh v1.3.4 noid-rank-lite --windows 3 --skip-final
+```
+
+如果继续 rank 方向，先看 lite 是否优于 noid；不要简单扩展 `v1.3.0` 的追加式 rank。
 
 比较时优先看：
 
@@ -117,6 +126,7 @@ sh tune.sh v1.2.0 --windows 5 --step-days 5
 sh tune.sh v1.2.0 --data-file data/stock_data.csv
 sh tune.sh v1.3.3 noid-marketrel --windows 3 --skip-final
 sh tune.sh v1.3.0 noid-rank --windows 3 --skip-final
+sh tune.sh v1.3.4 noid-rank-lite --windows 3 --skip-final
 sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final
 sh tune.sh v1.2.14 noid-full --windows 3 --skip-final
