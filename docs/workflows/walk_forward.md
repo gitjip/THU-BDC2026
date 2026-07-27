@@ -57,16 +57,19 @@ sh tune.sh quick --skip-final --resume
 | `balanced` | 常规调参 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
 | `noid` | 去股票编号对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
+| `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
 | `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
 | `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-stable`、`noid-full`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
 
 `noid` 是 `balanced` 的特征对照：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。
 
 `noid-stable` 是 `noid` 的正则化对照：继续移除 `instrument`，同时设置 `dropout=0.2`、`weight_decay=1e-4`。它用于检查 `noid` 倾向高波动股票的问题是否能通过更强正则化缓解。
+
+`noid-full` 是 `noid` 的完整数据对照：继续移除 `instrument`，保持 39 特征和小模型，只取消 `train_target_days` 与 `max_stocks_per_day` 限制。它用于判断更多训练数据是否能提升泛化，不用于同时比较 158+39 特征或更大模型。
 
 `smooth` 不是新模型，只是 `balanced` 的优化器对照：默认 `BDC_OPTIMIZER=lookahead`、`BDC_LOOKAHEAD_K=5`、`BDC_LOOKAHEAD_ALPHA=0.5`。它用于判断 Lookahead 是否能降低分数震荡和改善最差窗口。
 
@@ -74,17 +77,16 @@ sh tune.sh quick --skip-final --resume
 
 ## 5. 下一轮推荐对照
 
-`v1.2.6` 和 `v1.2.7` 显示 Lookahead 没有明显改变外部分数，完整排名暴露出固定选股池。`v1.2.8 noid` 去掉 `instrument` 后多窗口均值改善，但窗口 2 仍明显拖累，并且 top5 偏向高波动股票。下一步可以跑 `noid-stable`，只在 `noid` 基础上增加正则化：
+`v1.2.13` 显示 12 窗口下重新开启学习率调度和早停后，均值略高于关闭机制的 `v1.2.11`，且训练耗时大幅下降。下一步优先测试 `noid-full`，只增加训练数据量：
 
 ```bash
-sh tune.sh v1.2.9 noid-stable --skip-final
+sh tune.sh v1.2.14 noid-full --windows 3 --skip-final
 ```
 
-必要时再和当前默认 `balanced` 或原始 `noid` 复核：
+如果单窗口或 3 窗口耗时可接受，再扩到 12 窗口：
 
 ```bash
-sh tune.sh v1.2.9 balanced --skip-final
-sh tune.sh v1.2.9 noid --skip-final
+sh tune.sh v1.2.15 noid-full --windows 12 --skip-final
 ```
 
 比较时优先看：
@@ -109,11 +111,14 @@ sh tune.sh v1.2.0 --windows 5
 sh tune.sh v1.2.0 --windows 5 --step-days 5
 sh tune.sh v1.2.0 --data-file data/stock_data.csv
 sh tune.sh v1.2.9 noid-stable --skip-final
+sh tune.sh v1.2.14 noid-full --windows 3 --skip-final
 sh tune.sh v1.2.0 large --windows 3
 sh tune.sh v1.2.0 full --windows 3
 ```
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
+
+`manifest.json` 中 `tune_env` 记录的是 profile 写入的环境变量；如果命令行传了 `--windows 12` 这类参数，实际生效值看 `walk_forward_args` 和 `windows` 列表。`summary.csv` 中的行数也是实际完成窗口数。
 
 默认不覆盖正式提交文件。最终预测会保存在：
 

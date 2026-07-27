@@ -368,6 +368,21 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
     return {key: os.environ.get(key) for key in keys if os.environ.get(key) is not None}
 
 
+def get_walk_forward_args_snapshot(args: argparse.Namespace, generated_window_count: int) -> dict:
+    return {
+        "requested_windows": args.windows,
+        "generated_windows": generated_window_count,
+        "target_days": args.target_days,
+        "step_days": args.step_days,
+        "data_file_arg": args.data_file,
+        "skip_final": args.skip_final,
+        "publish_final": args.publish_final,
+        "create_tag": args.create_tag,
+        "resume": args.resume,
+        "dry_run": args.dry_run,
+    }
+
+
 def run_train(model_dir: Path, stock_data_file: Path, log_path: Path) -> float:
     env = make_child_env(model_dir=model_dir, stock_data_file=stock_data_file)
     return run_logged([sys.executable, "code/src/train.py"], env=env, log_path=log_path)
@@ -669,6 +684,15 @@ def main() -> None:
     tune_env = get_tune_env_snapshot()
     if tune_env:
         logger.info("调参参数: %s", ", ".join(f"{key}={value}" for key, value in tune_env.items()))
+    logger.info(
+        "walk-forward参数: windows=%s, target_days=%s, step_days=%s, skip_final=%s, resume=%s, dry_run=%s",
+        args.windows,
+        args.target_days,
+        args.step_days,
+        args.skip_final,
+        args.resume,
+        args.dry_run,
+    )
     logger.info("窗口数量: %s", len(windows))
     for window in windows:
         logger.info(
@@ -694,6 +718,7 @@ def main() -> None:
         "git": git_info,
         "data_file": str(Path(data_file).resolve()),
         "tune_env": tune_env,
+        "walk_forward_args": get_walk_forward_args_snapshot(args, len(windows)),
         "fast_dev_mode": parse_bool_env("BDC_FAST_DEV", False),
         "windows": [build_window_metadata(window, dates) for window in windows],
         "window_results": [],
