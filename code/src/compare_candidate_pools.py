@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from stage2_selection import compute_recent_risk_metrics
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TOP_KS = (5, 10, 20, 50, 100)
@@ -40,16 +42,6 @@ def resolve_path(value: str | Path) -> Path:
     if path.is_absolute():
         return path
     return REPO_ROOT / path
-
-
-def normalize_stock_codes(series: pd.Series) -> pd.Series:
-    codes = series.astype("string").fillna("").str.strip()
-    codes = codes.str.replace(r"\.0$", "", regex=True)
-    extracted = codes.str.extract(r"(\d{6})$", expand=False)
-    codes = extracted.where(extracted.notna(), codes)
-    numeric_mask = codes.str.fullmatch(r"\d{1,6}", na=False)
-    codes.loc[numeric_mask] = codes.loc[numeric_mask].str.zfill(6)
-    return codes.astype(str)
 
 
 def experiment_label(experiment_dir: Path) -> str:
@@ -192,64 +184,7 @@ def candidate_frame(frames: list[pd.DataFrame]) -> pd.DataFrame:
 
 def stock_recent_metrics(train_data_path: Path) -> pd.DataFrame:
     data = pd.read_csv(train_data_path, dtype={"股票代码": str})
-    required = {"股票代码", "日期", "收盘"}
-    missing = required - set(data.columns)
-    if missing:
-        raise ValueError(f"{train_data_path} missing columns for stage2 metrics: {sorted(missing)}")
-
-    data = data.copy()
-    data["stock_id"] = normalize_stock_codes(data["股票代码"])
-    data["日期"] = pd.to_datetime(data["日期"], errors="coerce").dt.normalize()
-    data["收盘"] = pd.to_numeric(data["收盘"], errors="coerce")
-    data = data.dropna(subset=["stock_id", "日期", "收盘"]).sort_values(["stock_id", "日期"])
-
-    rows = []
-    for stock_id, group in data.groupby("stock_id", sort=False):
-        close = group["收盘"].astype(float).reset_index(drop=True)
-        if len(close) == 0:
-            continue
-
-        def recent_return(days: int) -> float:
-            if len(close) <= days:
-                return 0.0
-            base = close.iloc[-days - 1]
-            if base == 0:
-                return 0.0
-            return float(close.iloc[-1] / base - 1.0)
-
-        daily_returns = close.pct_change(fill_method=None).tail(20).dropna()
-        volatility_20 = float(daily_returns.std()) if len(daily_returns) > 1 else 0.0
-        recent_close = close.tail(20)
-        running_max = recent_close.cummax()
-        drawdowns = recent_close / running_max - 1.0
-        max_drawdown_20 = float(-min(drawdowns.min(), 0.0)) if len(drawdowns) else 0.0
-
-        rows.append(
-            {
-                "stock_id": stock_id,
-                "stock_prefix": stock_id[:3],
-                "recent_return_5": recent_return(5),
-                "recent_return_10": recent_return(10),
-                "recent_return_20": recent_return(20),
-                "volatility_20": volatility_20,
-                "max_drawdown_20": max_drawdown_20,
-            }
-        )
-
-    metrics = pd.DataFrame(rows)
-    if metrics.empty:
-        return metrics
-
-    metrics["overheat_return"] = metrics[["recent_return_5", "recent_return_10"]].max(axis=1)
-    metrics["volatility_20_rank"] = metrics["volatility_20"].rank(pct=True)
-    metrics["overheat_rank"] = metrics["overheat_return"].rank(pct=True)
-    metrics["drawdown_rank"] = metrics["max_drawdown_20"].rank(pct=True)
-    metrics["risk_score"] = (
-        0.40 * metrics["volatility_20_rank"]
-        + 0.35 * metrics["overheat_rank"]
-        + 0.25 * metrics["drawdown_rank"]
-    )
-    return metrics
+    return compute_recent_risk_metrics(data, volatility_window=20)
 
 
 def union_top5_candidates(frames: list[pd.DataFrame], recent_metrics: pd.DataFrame) -> pd.DataFrame:

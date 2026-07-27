@@ -62,12 +62,13 @@ sh tune.sh quick --skip-final --resume
 | `noid-rank-replace` | 去编号+rank替代绝对量价 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
+| `noid-lowvol` | 去编号+低波动后处理 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, low-vol selection | 15 |
 | `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
 | `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-stable`、`noid-full`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
 
 `noid` 是 `balanced` 的特征对照：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。
 
@@ -82,6 +83,8 @@ sh tune.sh quick --skip-final --resume
 `noid-stable` 是 `noid` 的正则化对照：继续移除 `instrument`，同时设置 `dropout=0.2`、`weight_decay=1e-4`。它用于检查 `noid` 倾向高波动股票的问题是否能通过更强正则化缓解。
 
 `noid-full` 是 `noid` 的完整数据对照：继续移除 `instrument`，保持 39 特征和小模型，只取消 `train_target_days` 与 `max_stocks_per_day` 限制。它用于判断更多训练数据是否能提升泛化，不用于同时比较 158+39 特征或更大模型。
+
+`noid-lowvol` 是 `noid` 的预测后处理对照：训练配置与 `noid` 相同，但预测时设置 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5`，先取模型分数前 `BDC_STAGE2_POOL_SIZE=10` 只作为候选池，再按最近 20 个交易日历史波动率从低到高选回 5 只。它不会改变模型训练，只用于验证低波动二阶段过滤是否真的有用。
 
 `smooth` 不是新模型，只是 `balanced` 的优化器对照：默认 `BDC_OPTIMIZER=lookahead`、`BDC_LOOKAHEAD_K=5`、`BDC_LOOKAHEAD_ALPHA=0.5`。它用于判断 Lookahead 是否能降低分数震荡和改善最差窗口。
 
@@ -127,6 +130,7 @@ sh tune.sh v1.3.4 noid-rank-lite --windows 3 --skip-final
 sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final
 sh tune.sh v1.2.14 noid-full --windows 3 --skip-final
+sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2.13
 sh tune.sh v1.2.0 large --windows 3
 sh tune.sh v1.2.0 full --windows 3
 ```
@@ -149,7 +153,15 @@ stage2_rerank_candidates.csv
 
 这个诊断会把多个模型的 top5 并集当候选池，再测试“高波动惩罚、近期过热惩罚、回撤过滤、前缀集中度限制”等规则能否从并集里选回更好的 5 只股票。风险信号只来自窗口训练截止日以前的数据，目标窗口真实收益只用于事后评分。
 
-当前 `v1.2.13 noid` 与 `v1.3.2 noid-rank-replace` 的 12 窗口复盘中，`low_vol_then_rank_top5` 暂时最有希望；综合风险分和前缀限额表现较差。它还没有接入正式预测，后续若要使用，应先做更多窗口或更多模型组合复核。
+当前 `v1.2.13 noid` 与 `v1.3.2 noid-rank-replace` 的 12 窗口复盘中，`low_vol_then_rank_top5` 暂时最有希望；综合风险分和前缀限额表现较差。从 `v1.3.8` 起，它已作为可选预测后处理接入，但默认不启用。
+
+如果只想复用已有模型、单独评估后处理策略，可以让新实验目录复用旧模型：
+
+```bash
+sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2.13
+```
+
+这会校验窗口日期一致，然后跳过训练，只重跑当前版本的预测和评分。
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 

@@ -34,6 +34,7 @@ PROFILE_DESCRIPTIONS = {
     "noid-marketrel": "noid + 市场相对特征，用于测试个股相对市场强弱。",
     "noid-stable": "noid + 更强正则化，用于测试 dropout/weight_decay 是否缓解高波动偏好。",
     "noid-full": "noid + 完整训练数据，用于测试取消训练目标日和每日股票抽样后的效果。",
+    "noid-lowvol": "noid + 低波动二阶段后处理，用于测试候选池低波动优先是否改善 top5。",
     "smooth": "Lookahead 优化器对照档，用于测试优化器抗震荡效果。",
     "stable": "更强正则化对照档，保留 instrument 输入。",
     "large": "慢速候选复核档，较大前馈层和更多层数。",
@@ -53,6 +54,9 @@ NOTE_CONFIG_KEYS = [
     "BDC_DROPOUT",
     "BDC_USE_INSTRUMENT_FEATURE",
     "BDC_USE_MARKET_RELATIVE_FEATURES",
+    "BDC_SELECTION_STRATEGY",
+    "BDC_STAGE2_POOL_SIZE",
+    "BDC_STAGE2_VOL_WINDOW",
     "BDC_USE_CROSS_SECTIONAL_RANKS",
     "BDC_CROSS_SECTIONAL_RANK_MODE",
     "BDC_CROSS_SECTIONAL_RANK_REPLACE_SET",
@@ -140,6 +144,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--publish-final", action="store_true", help="把最终预测复制到 output/result.csv；默认只保存在 experiments 下")
     parser.add_argument("--create-tag", action="store_true", help="流程成功后创建同名本地 Git tag；要求工作区无未提交改动")
     parser.add_argument("--resume", action="store_true", help="复用已有版本目录中已完成的窗口")
+    parser.add_argument("--rerun-predictions", action="store_true", help="配合 --resume 时强制重跑预测和评分，不重训已有模型")
+    parser.add_argument("--reuse-models-from", help="复用另一个实验目录的已训练模型，只重跑当前版本预测和评分")
     parser.add_argument("--dry-run", action="store_true", help="只打印窗口计划，不执行训练、预测和打分")
     return parser.parse_args()
 
@@ -314,6 +320,49 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
+def resolve_experiment_ref(value: str | None) -> Path | None:
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        direct = REPO_ROOT / path
+        if direct.exists():
+            path = direct
+        else:
+            path = EXPERIMENTS_DIR / value
+    if not path.exists():
+        raise FileNotFoundError(f"复用模型实验目录不存在: {path}")
+    return path
+
+
+def source_window_model_dir(source_experiment_dir: Path | None, window: WalkForwardWindow) -> Path | None:
+    if source_experiment_dir is None:
+        return None
+    source_window_dir = source_experiment_dir / "windows" / window.name
+    metadata = read_json(source_window_dir / "metadata.json")
+    source_window = metadata.get("window") or {}
+    if source_window:
+        source_target_dates = format_date_list(source_window.get("target_dates") or [])
+        if source_window.get("as_of_date") != window.as_of_date or source_target_dates != format_date_list(window.target_dates):
+            raise ValueError(
+                f"{source_window_dir} 的窗口日期与当前 {window.name} 不一致，不能复用模型"
+            )
+
+    model_dir = source_window_dir / "model"
+    if not (model_dir / "best_model.pth").exists() or not (model_dir / "scaler.pkl").exists():
+        raise FileNotFoundError(f"复用模型缺少 best_model.pth 或 scaler.pkl: {model_dir}")
+    return model_dir
+
+
+def source_final_model_dir(source_experiment_dir: Path | None) -> Path | None:
+    if source_experiment_dir is None:
+        return None
+    model_dir = source_experiment_dir / "final" / "model"
+    if not (model_dir / "best_model.pth").exists() or not (model_dir / "scaler.pkl").exists():
+        raise FileNotFoundError(f"复用最终模型缺少 best_model.pth 或 scaler.pkl: {model_dir}")
+    return model_dir
+
+
 def read_existing_summary(experiment_dir: Path) -> dict[str, dict]:
     summary_path = experiment_dir / "summary.csv"
     if not summary_path.exists():
@@ -405,6 +454,9 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
         "BDC_DROPOUT",
         "BDC_USE_INSTRUMENT_FEATURE",
         "BDC_USE_MARKET_RELATIVE_FEATURES",
+        "BDC_SELECTION_STRATEGY",
+        "BDC_STAGE2_POOL_SIZE",
+        "BDC_STAGE2_VOL_WINDOW",
         "BDC_USE_CROSS_SECTIONAL_RANKS",
         "BDC_CROSS_SECTIONAL_RANK_MODE",
         "BDC_CROSS_SECTIONAL_RANK_REPLACE_SET",
@@ -437,6 +489,8 @@ def get_walk_forward_args_snapshot(args: argparse.Namespace, generated_window_co
         "publish_final": args.publish_final,
         "create_tag": args.create_tag,
         "resume": args.resume,
+        "rerun_predictions": args.rerun_predictions,
+        "reuse_models_from": args.reuse_models_from,
         "dry_run": args.dry_run,
     }
 
@@ -551,6 +605,8 @@ def run_window(
     version: str,
     window: WalkForwardWindow,
     resume: bool,
+    rerun_predictions: bool,
+    source_experiment_dir: Path | None,
     existing_row: dict | None = None,
 ) -> dict:
     window_dir = experiment_dir / "windows" / window.name
@@ -561,6 +617,8 @@ def run_window(
     prediction_diagnostics_summary_path = window_dir / "prediction_diagnostics.json"
     score_path = window_dir / "score.json"
     metadata_path = window_dir / "metadata.json"
+    reused_model_dir = source_window_model_dir(source_experiment_dir, window)
+    active_model_dir = reused_model_dir or model_dir
     window_start_time = time.perf_counter()
     train_seconds = optional_float(existing_row.get("train_seconds")) if existing_row else None
     predict_seconds = optional_float(existing_row.get("predict_seconds")) if existing_row else None
@@ -578,7 +636,8 @@ def run_window(
             "window": build_window_metadata(window, trading_dates),
             "train_data": str(train_data_path.relative_to(REPO_ROOT)),
             "target_data": str(target_data_path.relative_to(REPO_ROOT)),
-            "model_dir": str(model_dir.relative_to(REPO_ROOT)),
+            "model_dir": display_path(active_model_dir),
+            "reused_model_dir": display_path(reused_model_dir) if reused_model_dir else None,
             "prediction": str(prediction_path.relative_to(REPO_ROOT)),
             "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
             "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
@@ -587,18 +646,21 @@ def run_window(
         },
     )
 
-    if resume and (model_dir / "best_model.pth").exists():
+    if reused_model_dir:
+        logger.info("%s 复用模型，跳过训练: %s", window.name, display_path(reused_model_dir))
+        train_seconds = 0.0
+    elif resume and (model_dir / "best_model.pth").exists():
         logger.info("%s 已有模型，跳过训练", window.name)
     else:
         logger.info("%s 训练: as_of=%s", window.name, window.as_of_date)
         train_seconds = run_train(model_dir=model_dir, stock_data_file=train_data_path, log_path=window_dir / "logs" / "train_command.log")
 
-    if resume and prediction_path.exists() and prediction_scores_path.exists():
+    if resume and not rerun_predictions and prediction_path.exists() and prediction_scores_path.exists():
         logger.info("%s 已有预测结果，跳过预测", window.name)
     else:
         logger.info("%s 预测: 目标窗口=%s ~ %s", window.name, window.target_start_date, window.target_end_date)
         predict_seconds = run_predict(
-            model_dir=model_dir,
+            model_dir=active_model_dir,
             stock_data_file=train_data_path,
             result_path=prediction_path,
             scores_path=prediction_scores_path,
@@ -652,7 +714,8 @@ def run_window(
         "predict_duration": format_duration(predict_seconds),
         "window_seconds": window_seconds,
         "window_duration": format_duration(window_seconds),
-        "model_dir": str(model_dir.relative_to(REPO_ROOT)),
+        "model_dir": display_path(active_model_dir),
+        "reused_model_dir": display_path(reused_model_dir) if reused_model_dir else "",
         "prediction": str(prediction_path.relative_to(REPO_ROOT)),
         "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
         "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
@@ -670,12 +733,16 @@ def run_final(
     experiment_dir: Path,
     publish_final: bool,
     resume: bool,
+    rerun_predictions: bool,
+    source_experiment_dir: Path | None,
     existing_final: dict | None = None,
 ) -> dict:
     final_dir = experiment_dir / "final"
     model_dir = final_dir / "model"
     result_path = final_dir / "result.csv"
     result_scores_path = final_dir / "result_scores.csv"
+    reused_model_dir = source_final_model_dir(source_experiment_dir)
+    active_model_dir = reused_model_dir or model_dir
     final_start_time = time.perf_counter()
     train_seconds = optional_float(existing_final.get("train_seconds")) if existing_final else None
     predict_seconds = optional_float(existing_final.get("predict_seconds")) if existing_final else None
@@ -683,18 +750,21 @@ def run_final(
 
     log_section("最终模型训练与预测")
 
-    if resume and (model_dir / "best_model.pth").exists():
+    if reused_model_dir:
+        logger.info("复用最终模型，跳过训练: %s", display_path(reused_model_dir))
+        train_seconds = 0.0
+    elif resume and (model_dir / "best_model.pth").exists():
         logger.info("最终模型已存在，跳过训练")
     else:
         logger.info("训练最终模型: %s", model_dir)
         train_seconds = run_train(model_dir=model_dir, stock_data_file=full_data_file, log_path=final_dir / "logs" / "train_command.log")
 
-    if resume and result_path.exists() and result_scores_path.exists():
+    if resume and not rerun_predictions and result_path.exists() and result_scores_path.exists():
         logger.info("最终预测已存在，跳过预测")
     else:
         logger.info("生成最终预测: %s", result_path)
         predict_seconds = run_predict(
-            model_dir=model_dir,
+            model_dir=active_model_dir,
             stock_data_file=full_data_file,
             result_path=result_path,
             scores_path=result_scores_path,
@@ -717,7 +787,8 @@ def run_final(
     logger.info("最终流程完成: 耗时=%s", format_duration(final_seconds))
 
     return {
-        "model_dir": str(model_dir.relative_to(REPO_ROOT)),
+        "model_dir": display_path(active_model_dir),
+        "reused_model_dir": display_path(reused_model_dir) if reused_model_dir else "",
         "prediction": str(result_path.relative_to(REPO_ROOT)),
         "prediction_scores": str(result_scores_path.relative_to(REPO_ROOT)),
         "published_prediction": published_path,
@@ -769,6 +840,8 @@ def write_experiment_note(experiment_dir: Path, manifest: dict) -> None:
                 f"- `generated_windows`: `{walk_forward_args.get('generated_windows', '')}`",
                 f"- `step_days`: `{walk_forward_args.get('step_days', '')}`",
                 f"- `skip_final`: `{walk_forward_args.get('skip_final', '')}`",
+                f"- `rerun_predictions`: `{walk_forward_args.get('rerun_predictions', '')}`",
+                f"- `reuse_models_from`: `{walk_forward_args.get('reuse_models_from', '')}`",
             ]
         )
 
@@ -852,12 +925,14 @@ def main() -> None:
     if tune_env:
         logger.info("调参参数: %s", ", ".join(f"{key}={value}" for key, value in tune_env.items()))
     logger.info(
-        "walk-forward参数: windows=%s, target_days=%s, step_days=%s, skip_final=%s, resume=%s, dry_run=%s",
+        "walk-forward参数: windows=%s, target_days=%s, step_days=%s, skip_final=%s, resume=%s, rerun_predictions=%s, reuse_models_from=%s, dry_run=%s",
         args.windows,
         args.target_days,
         args.step_days,
         args.skip_final,
         args.resume,
+        args.rerun_predictions,
+        args.reuse_models_from,
         args.dry_run,
     )
     logger.info("窗口数量: %s", len(windows))
@@ -875,6 +950,7 @@ def main() -> None:
     if args.dry_run:
         return
 
+    source_experiment_dir = resolve_experiment_ref(args.reuse_models_from)
     existing_summary = read_existing_summary(experiment_dir) if args.resume else {}
     previous_manifest = read_json(experiment_dir / "manifest.json") if args.resume else {}
     git_info = get_git_info()
@@ -884,6 +960,7 @@ def main() -> None:
         "repo_root": str(REPO_ROOT),
         "git": git_info,
         "data_file": str(Path(data_file).resolve()),
+        "reuse_models_from": display_path(source_experiment_dir) if source_experiment_dir else None,
         "tune_env": tune_env,
         "walk_forward_args": get_walk_forward_args_snapshot(args, len(windows)),
         "fast_dev_mode": parse_bool_env("BDC_FAST_DEV", False),
@@ -903,6 +980,8 @@ def main() -> None:
                 args.version,
                 window,
                 resume=args.resume,
+                rerun_predictions=args.rerun_predictions,
+                source_experiment_dir=source_experiment_dir,
                 existing_row=existing_summary.get(window.name),
             )
         )
@@ -922,6 +1001,8 @@ def main() -> None:
             experiment_dir,
             args.publish_final,
             resume=args.resume,
+            rerun_predictions=args.rerun_predictions,
+            source_experiment_dir=source_experiment_dir,
             existing_final=previous_manifest.get("final"),
         )
 

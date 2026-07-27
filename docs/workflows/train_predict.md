@@ -115,6 +115,14 @@ stock_id,weight
 
 最多 5 只股票，权重和不能超过 1。当前逻辑是取模型分数最高的 5 只股票，等权重 `0.2`。
 
+默认选股策略是 `BDC_SELECTION_STRATEGY=model_top5`。如果要测试二阶段低波动后处理，可显式启用：
+
+```bash
+BDC_SELECTION_STRATEGY=low_vol_then_rank_top5 BDC_STAGE2_POOL_SIZE=10 sh test.sh
+```
+
+这个策略先取模型分数前 `BDC_STAGE2_POOL_SIZE` 只股票，再按提交截止日前最近 20 个交易日的历史波动率从低到高选回 5 只。它是实验选项，不是当前默认提交策略。
+
 ## 5. 本地调试与自测
 
 如果只是确认训练和预测能跑通，优先执行：
@@ -162,6 +170,9 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `early_stopping_patience`：默认完整训练 3，debug 2；设为 0 可关闭早停。
 - `use_instrument_feature`：默认开启；可用 `BDC_USE_INSTRUMENT_FEATURE=0` 从模型输入中移除股票编号特征。
 - `use_market_relative_features`：默认关闭；可用 `BDC_USE_MARKET_RELATIVE_FEATURES=1` 追加市场相对特征。
+- `selection_strategy`：默认 `model_top5`；可用 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5` 启用低波动二阶段后处理。
+- `stage2_pool_size`：默认 10；低波动后处理从模型前多少名中选回 5 只。
+- `stage2_vol_window`：默认 20；低波动后处理计算历史波动率的交易日窗口。
 - `use_cross_sectional_rank_features`：默认关闭；可用 `BDC_USE_CROSS_SECTIONAL_RANKS=1` 增加当日横截面百分位排名特征。
 - `cross_sectional_rank_mode`：默认 `off`；`append` 表示追加 rank 特征，`replace` 表示用 rank 替换部分原始绝对量价特征。
 - `cross_sectional_rank_replace_set`：默认 `default`；`lite` 只替换开高低收、成交量、成交额和涨跌额。
@@ -180,6 +191,7 @@ BDC_USE_INSTRUMENT_FEATURE=0 BDC_USE_CROSS_SECTIONAL_RANKS=1 sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite sh train.sh debug
 BDC_NUM_EPOCHS=30 BDC_LR_SCHEDULER=off BDC_EARLY_STOPPING_PATIENCE=0 sh tune.sh v1.2.10 noid --skip-final
+BDC_SELECTION_STRATEGY=low_vol_then_rank_top5 BDC_STAGE2_POOL_SIZE=10 sh test.sh
 BDC_SUBMISSION_DATE=2026-08-02 sh test.sh
 BDC_TARGET_START_DATE=2026-08-08 sh test.sh
 BDC_MARKET_HOLIDAYS=2026-08-03 sh test.sh

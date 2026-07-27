@@ -20,6 +20,7 @@ from data_utils import (
 	setup_logging,
 )
 from model import StockTransformer
+from stage2_selection import normalize_selection_strategy, select_predictions
 from utils import (
 	apply_cross_sectional_rank_features,
 	apply_market_relative_features,
@@ -109,6 +110,23 @@ def parse_args():
 		'--scores-output',
 		default=os.environ.get('BDC_PREDICTION_SCORES_OUTPUT'),
 		help='完整候选股票排名诊断文件；默认写到 output 同目录的 *_scores.csv',
+	)
+	parser.add_argument(
+		'--selection-strategy',
+		default=os.environ.get('BDC_SELECTION_STRATEGY', config.get('selection_strategy', 'model_top5')),
+		help='选股后处理策略，默认 model_top5；可选 low_vol_then_rank_top5',
+	)
+	parser.add_argument(
+		'--stage2-pool-size',
+		type=int,
+		default=int(os.environ.get('BDC_STAGE2_POOL_SIZE', config.get('stage2_pool_size', 10))),
+		help='二阶段策略候选池大小，默认 10；必须不小于 5',
+	)
+	parser.add_argument(
+		'--stage2-vol-window',
+		type=int,
+		default=int(os.environ.get('BDC_STAGE2_VOL_WINDOW', config.get('stage2_vol_window', 20))),
+		help='二阶段波动率计算窗口，默认 20 个交易日',
 	)
 	return parser.parse_args()
 
@@ -324,28 +342,36 @@ def main():
 	ranked_stock_ids = [sequence_stock_ids[i] for i in order]
 	ranked_scores = scores[order]
 
-	# 仅输出前5，权重固定 0.2
-	if len(ranked_stock_ids) < 5:
-		raise ValueError(f'可预测股票不足5只，当前仅有 {len(ranked_stock_ids)} 只')
-	top5 = ranked_stock_ids[:5]
-	output_df = pd.DataFrame({
-		'stock_id': top5,
-		'weight': [0.2] * len(top5),
-	})
-	output_df.to_csv(output_path, index=False)
-
-	scores_output_path = args.scores_output or default_scores_output_path(output_path)
-	os.makedirs(os.path.dirname(scores_output_path) or '.', exist_ok=True)
 	scores_df = pd.DataFrame({
 		'rank': np.arange(1, len(ranked_stock_ids) + 1),
 		'stock_id': ranked_stock_ids,
 		'pred_score': ranked_scores,
 	})
-	scores_df['selected'] = scores_df['rank'] <= 5
-	scores_df['weight'] = np.where(scores_df['selected'], 0.2, 0.0)
+	selection_strategy = normalize_selection_strategy(args.selection_strategy)
+	selected_df, scores_df = select_predictions(
+		scores_df,
+		history=raw_df,
+		strategy=selection_strategy,
+		top_k=5,
+		pool_size=args.stage2_pool_size,
+		volatility_window=args.stage2_vol_window,
+	)
+
+	top5 = selected_df['stock_id'].tolist()
+	output_df = selected_df[['stock_id', 'weight']].copy()
+	output_df.to_csv(output_path, index=False)
+
+	scores_output_path = args.scores_output or default_scores_output_path(output_path)
+	os.makedirs(os.path.dirname(scores_output_path) or '.', exist_ok=True)
 	scores_df.to_csv(scores_output_path, index=False)
 
 	logger.info("参与排序股票数: %s", len(ranked_stock_ids))
+	logger.info(
+		"选股策略: %s | stage2_pool_size=%s | stage2_vol_window=%s",
+		selection_strategy,
+		args.stage2_pool_size,
+		args.stage2_vol_window,
+	)
 	logger.info("Top5: %s", ", ".join(top5))
 	logger.info("结果已写入: %s", output_path)
 	logger.info("完整候选排名已写入: %s", scores_output_path)

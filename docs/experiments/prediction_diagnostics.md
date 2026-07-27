@@ -162,6 +162,20 @@ stage2_rerank_candidates.csv
 
 当前判断：二阶段过滤有希望，但第一版只应保留 `low_vol_then_rank_top5` 作为下一步候选。不要把综合风险惩罚或前缀限制直接接入正式预测。
 
+从 `v1.3.8` 起，`low_vol_then_rank_top5` 已作为可选预测后处理接入：
+
+```bash
+BDC_SELECTION_STRATEGY=low_vol_then_rank_top5 BDC_STAGE2_POOL_SIZE=10 sh test.sh
+```
+
+walk-forward 中对应 profile 是 `noid-lowvol`。若要只复用已有模型、不重新训练，可运行：
+
+```bash
+sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2.13
+```
+
+注意：这次接入的是“单模型分数前 N 名内低波动优先”，而 `v1.3.7` 诊断的最好结果来自“两模型 top5 并集内低波动优先”。二者相近但不完全等价，必须用 walk-forward 分数确认。
+
 ## 5. v1.3.4 rank-lite 诊断结论
 
 `v1.3.4 noid-rank-lite` 的 3 窗口结果显示，问题不是 top5 偶然选错，而是高分区整体排序变差：
