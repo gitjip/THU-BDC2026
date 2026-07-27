@@ -90,11 +90,7 @@ sh tune.sh quick --skip-final --resume
 
 `v1.3.2 noid-rank-replace` 已跑完 12 窗口，和 noid 基本打平。当前主基线仍是 `v1.2.13 noid`；已有结果不用重跑，如果只是复核，使用新的版本号运行 `noid`，不要复用已存在的 `v1.2.13` 目录。
 
-下一步优先跑 `noid-marketrel` 最近 3 窗口：
-
-```bash
-sh tune.sh v1.3.3 noid-marketrel --windows 3 --skip-final
-```
+`v1.3.3 noid-marketrel` 已跑完最近 3 窗口，均值约 `-0.036034`，全弱于同窗口 noid，不建议扩跑 12 窗口。
 
 如果继续 rank 方向，优先缩小替换组，例如只替换开高低收和成交额，或只保留收益/换手率相关 rank，不要简单扩展 `v1.3.0` 的追加式 rank。
 
