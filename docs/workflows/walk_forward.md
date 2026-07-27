@@ -71,7 +71,7 @@ sh tune.sh quick --skip-final --resume
 
 `noid-rank` 是 `noid` 的横截面特征对照：默认 `BDC_USE_CROSS_SECTIONAL_RANKS=1`，会把若干收益、量能、波动和技术指标转成当日百分位排名特征，新增列名以 `_cs_rank` 结尾。它用于判断相对强弱特征是否能提升泛化。
 
-`noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。它用于判断 `v1.3.0` 失败是否来自 rank 方向本身，还是来自“追加重复特征”带来的噪声。
+`noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。`v1.3.2` 12 窗口几乎打平 noid，说明它比追加式 rank 合理，但暂时不作为默认主线。
 
 `noid-stable` 是 `noid` 的正则化对照：继续移除 `instrument`，同时设置 `dropout=0.2`、`weight_decay=1e-4`。它用于检查 `noid` 倾向高波动股票的问题是否能通过更强正则化缓解。
 
@@ -85,13 +85,9 @@ sh tune.sh quick --skip-final --resume
 
 `v1.2.15 balanced` 与 `v1.2.13 noid` 的 12 窗口严格对照显示，移除 `instrument` 后均值和多数窗口表现更好。`v1.3.0 noid-rank` 最近 3 窗口均值明显变差，因此不要直接扩到 12 窗口。
 
-如果继续 rank 方向，先跑 `noid-rank-replace` 的最近 3 个窗口，不要复用 `v1.3.0` 直接 `--resume`：
+`v1.3.2 noid-rank-replace` 已跑完 12 窗口，和 noid 基本打平。当前主基线仍是 `v1.2.13 noid`；已有结果不用重跑，如果只是复核，使用新的版本号运行 `noid`，不要复用已存在的 `v1.2.13` 目录。
 
-```bash
-sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
-```
-
-如果它仍明显弱于同窗口 `noid`，下一步再考虑更小的 rank 特征组，例如只保留收益和换手率相关 rank。
+如果继续 rank 方向，优先缩小替换组，例如只替换开高低收和成交额，或只保留收益/换手率相关 rank，不要简单扩展 `v1.3.0` 的追加式 rank。
 
 比较时优先看：
 
