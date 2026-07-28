@@ -20,7 +20,7 @@
 - `v1.4.7` 起修正 noid 主线训练预算：`noid`、`noid-stable`、`noid-lowvol` 和正式集成源模型里的 noid 都使用 30 epoch 上限。
 - `v1.4.7/8` 复核后确认：noid 提高到 30 epoch 后与旧 noid 24 窗口结果完全一致，`rank-replace` 相对 noid 的优势不是由 epoch 上限造成的；但 `ensemble-lowvol` 仍低于 `rank-replace`。
 - `v1.4.9` 起正式 `train.sh/test.sh` 默认改为 `rank-replace` 单模型；两模型集成保留为 `ensemble` 可选模式。
-- `v1.5.0` 新增 `noid-rank-sharp` 训练目标实验：不改特征和模型，只降低真实收益 softmax 温度，测试 listwise 监督信号是否过弱。
+- `v1.5.0` `noid-rank-sharp` 3 窗口短测后结论是否定的：不改特征和模型，只降低真实收益 softmax 温度，结果反而略差于同日期 `rank-replace`，说明当前 listwise 监督信号不是主要瓶颈。
 
 ## 版本记录
 
@@ -56,7 +56,7 @@
 | `v1.4.7` | `noid` 30 epoch 公平预算复核 | 24 | `0.002716` | 与 `v1.4.4` 逐窗口完全一致；noid 弱不是 15 epoch 截断造成的。 |
 | `v1.4.8` | `ensemble-lowvol` 使用 `v1.4.7+v1.4.5` | 24 | `0.014062` | 与 `v1.4.6` 完全一致；优于 noid，但低于 rank-replace，不建议作为当前默认提交主线。 |
 | `v1.4.9` | 默认提交入口切到 rank-replace，新增 trend-quality 短测 | 3 | `-0.067912` | `train.sh/test.sh` 默认使用 `model/rank_replace`；`noid-rank-trendq` 最新 3 窗口全负，均值低于同日期 `v1.4.5` 约 `0.048780`，不扩跑。 |
-| `v1.5.0` | `noid-rank-sharp` 待短测 | 3 | - | 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`，用于验证更尖锐 listwise 目标是否改善源模型排序信号。 |
+| `v1.5.0` | `noid-rank-sharp` 3 窗口短测 | 3 | `-0.024860` | 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`；同日期对照下 0/3 胜出，均值略差，先止损。 |
 
 ## 后续记录规范
 
