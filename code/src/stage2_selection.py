@@ -7,6 +7,8 @@ from data_utils import normalize_stock_codes
 
 MODEL_TOP5 = "model_top5"
 LOW_VOL_THEN_RANK_TOP5 = "low_vol_then_rank_top5"
+ENSEMBLE_AVG_RANK_TOP5 = "ensemble_avg_rank_top5"
+ENSEMBLE_LOW_VOL_TOP5 = "ensemble_low_vol_top5"
 RISK_METRIC_COLUMNS = [
     "stock_id",
     "stock_prefix",
@@ -43,6 +45,25 @@ def normalize_selection_strategy(value: str | None) -> str:
         raise ValueError(
             f"Unsupported BDC_SELECTION_STRATEGY: {value}. "
             f"Supported: {MODEL_TOP5}, {LOW_VOL_THEN_RANK_TOP5}"
+        )
+    return aliases[strategy]
+
+
+def normalize_ensemble_selection_strategy(value: str | None) -> str:
+    strategy = (value or ENSEMBLE_LOW_VOL_TOP5).strip().lower().replace("-", "_")
+    aliases = {
+        "ensemble_avg": ENSEMBLE_AVG_RANK_TOP5,
+        "ensemble_avg_rank": ENSEMBLE_AVG_RANK_TOP5,
+        "ensemble_avg_rank_top5": ENSEMBLE_AVG_RANK_TOP5,
+        "ensemble_low_vol": ENSEMBLE_LOW_VOL_TOP5,
+        "ensemble_low_vol_top5": ENSEMBLE_LOW_VOL_TOP5,
+        "top5_union_low_vol": ENSEMBLE_LOW_VOL_TOP5,
+        "union_low_vol": ENSEMBLE_LOW_VOL_TOP5,
+    }
+    if strategy not in aliases:
+        raise ValueError(
+            f"Unsupported ensemble selection strategy: {value}. "
+            f"Supported: {ENSEMBLE_AVG_RANK_TOP5}, {ENSEMBLE_LOW_VOL_TOP5}"
         )
     return aliases[strategy]
 
@@ -191,4 +212,113 @@ def select_predictions(
 
     selected = annotated[annotated["selected"]].copy()
     selected = selected.sort_values(["stage2_selection_rank", "rank"]).reset_index(drop=True)
+    return selected, annotated
+
+
+def build_ensemble_scores(score_frames: list[tuple[str, pd.DataFrame]]) -> pd.DataFrame:
+    if len(score_frames) < 2:
+        raise ValueError("ensemble requires at least two score frames")
+
+    combined = None
+    rank_columns = []
+    for label, frame in score_frames:
+        required = {"rank", "stock_id", "pred_score"}
+        missing = required - set(frame.columns)
+        if missing:
+            raise ValueError(f"{label} score frame missing columns: {sorted(missing)}")
+
+        partial = frame[["rank", "stock_id", "pred_score"]].copy()
+        partial["stock_id"] = normalize_stock_codes(partial["stock_id"])
+        partial["rank"] = pd.to_numeric(partial["rank"], errors="coerce")
+        partial["pred_score"] = pd.to_numeric(partial["pred_score"], errors="coerce")
+        partial = partial.dropna(subset=["rank", "stock_id"]).copy()
+        partial["rank"] = partial["rank"].astype(int)
+        partial = partial.rename(
+            columns={
+                "rank": f"rank_{label}",
+                "pred_score": f"pred_score_{label}",
+            }
+        )
+        rank_columns.append(f"rank_{label}")
+        combined = partial if combined is None else combined.merge(partial, on="stock_id", how="outer")
+
+    assert combined is not None
+    combined["stock_prefix"] = combined["stock_id"].str[:3]
+    combined["model_count"] = len(score_frames)
+    combined["top5_vote_count"] = sum(combined[column].le(5).fillna(False).astype(int) for column in rank_columns)
+    combined["top20_vote_count"] = sum(combined[column].le(20).fillna(False).astype(int) for column in rank_columns)
+    combined["top5_borda"] = sum((6 - combined[column]).clip(lower=0).fillna(0) for column in rank_columns)
+    combined["top20_borda"] = sum((21 - combined[column]).clip(lower=0).fillna(0) for column in rank_columns)
+    combined["avg_rank_fill"] = combined[rank_columns].fillna(9999).mean(axis=1)
+    combined["min_rank_fill"] = combined[rank_columns].fillna(9999).min(axis=1)
+    combined["ensemble_score"] = (
+        combined["top5_borda"] * 10000
+        + combined["top20_borda"] * 100
+        - combined["avg_rank_fill"]
+    )
+    combined = combined.sort_values(
+        ["top5_borda", "top20_borda", "avg_rank_fill", "min_rank_fill"],
+        ascending=[False, False, True, True],
+    ).reset_index(drop=True)
+    combined["ensemble_rank_before_stage2"] = range(1, len(combined) + 1)
+    return combined
+
+
+def select_ensemble_predictions(
+    score_frames: list[tuple[str, pd.DataFrame]],
+    history: pd.DataFrame,
+    strategy: str = ENSEMBLE_LOW_VOL_TOP5,
+    top_k: int = 5,
+    volatility_window: int = 20,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    strategy = normalize_ensemble_selection_strategy(strategy)
+    if top_k <= 0:
+        raise ValueError("top_k must be positive")
+
+    combined = build_ensemble_scores(score_frames)
+    candidates = combined[combined["top5_vote_count"] > 0].copy()
+    if len(candidates) < top_k:
+        raise ValueError(f"ensemble top5 union candidates不足 {top_k} 只，当前仅有 {len(candidates)} 只")
+
+    candidates = annotate_scores_with_risk(
+        candidates,
+        history=history,
+        volatility_window=volatility_window,
+    )
+    if strategy == ENSEMBLE_AVG_RANK_TOP5:
+        selected = candidates.sort_values(["avg_rank_fill", "min_rank_fill"]).head(top_k).copy()
+    elif strategy == ENSEMBLE_LOW_VOL_TOP5:
+        selected = candidates.sort_values(["volatility_20_rank", "avg_rank_fill", "min_rank_fill"]).head(top_k).copy()
+    else:
+        raise ValueError(f"Unsupported ensemble selection strategy: {strategy}")
+
+    selected = selected.reset_index(drop=True)
+    selected["stage2_selection_rank"] = range(1, len(selected) + 1)
+    selected_ids = set(selected["stock_id"])
+
+    annotated = annotate_scores_with_risk(
+        combined,
+        history=history,
+        volatility_window=volatility_window,
+    )
+    rank_map = dict(zip(selected["stock_id"], selected["stage2_selection_rank"]))
+    annotated["selection_strategy"] = strategy
+    annotated["stage2_pool_member"] = annotated["top5_vote_count"] > 0
+    annotated["stage2_selection_rank"] = annotated["stock_id"].map(rank_map)
+    annotated["selected"] = annotated["stock_id"].isin(selected_ids)
+    annotated["weight"] = 0.0
+    annotated.loc[annotated["selected"], "weight"] = 1.0 / top_k
+    annotated = annotated.sort_values(
+        ["selected", "stage2_selection_rank", "ensemble_rank_before_stage2"],
+        ascending=[False, True, True],
+    ).reset_index(drop=True)
+    annotated["rank"] = range(1, len(annotated) + 1)
+    annotated["pred_score"] = (
+        annotated["selected"].astype(int) * 1000000
+        - annotated["stage2_selection_rank"].fillna(9999).astype(float)
+        + annotated["ensemble_score"] / 1000000
+    )
+
+    selected = annotated[annotated["selected"]].copy()
+    selected = selected.sort_values(["stage2_selection_rank", "ensemble_rank_before_stage2"]).reset_index(drop=True)
     return selected, annotated

@@ -63,6 +63,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
 | `noid-lowvol` | 去编号+低波动后处理 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, low-vol selection | 15 |
+| `ensemble-lowvol` | 两模型 top5 并集+低波动重排 | 3 | 复用源模型 | 复用源模型 | 不训练 | 不训练 | noid + rank-replace | 不训练 |
 | `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
 | `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
@@ -85,6 +86,8 @@ sh tune.sh quick --skip-final --resume
 `noid-full` 是 `noid` 的完整数据对照：继续移除 `instrument`，保持 39 特征和小模型，只取消 `train_target_days` 与 `max_stocks_per_day` 限制。它用于判断更多训练数据是否能提升泛化，不用于同时比较 158+39 特征或更大模型。
 
 `noid-lowvol` 是 `noid` 的预测后处理对照：训练配置与 `noid` 相同，但预测时设置 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5`，先取模型分数前 `BDC_STAGE2_POOL_SIZE=10` 只作为候选池，再按最近 20 个交易日历史波动率从低到高选回 5 只。它不会改变模型训练，只用于验证低波动二阶段过滤是否真的有用。
+
+`ensemble-lowvol` 不训练新模型，默认通过 `BDC_ENSEMBLE_SOURCES=v1.2.13,v1.3.2` 复用两个已有实验的窗口模型。每个源模型先各自输出 top5，再取两者 top5 并集，最后在并集内按最近 20 个交易日历史波动率从低到高选 5 只。它验证的是 `v1.3.7` 诊断中的“两模型 top5 并集低波动重排”，不是 `v1.3.8` 的单模型 top10 低波动策略。
 
 `smooth` 不是新模型，只是 `balanced` 的优化器对照：默认 `BDC_OPTIMIZER=lookahead`、`BDC_LOOKAHEAD_K=5`、`BDC_LOOKAHEAD_ALPHA=0.5`。它用于判断 Lookahead 是否能降低分数震荡和改善最差窗口。
 
@@ -164,6 +167,18 @@ sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2
 这会校验窗口日期一致，然后跳过训练，只重跑当前版本的预测和评分。
 
 `v1.3.8 noid-lowvol` 复用 `v1.2.13` 模型后的 12 窗口均值约 `0.018015`，低于原 noid 的 `0.024783`，最差窗口也更差。因此单模型 top10 内低波动优先暂不建议作为默认策略。
+
+下一步用 `ensemble-lowvol` 验证 `v1.3.7` 的诊断假设是否能落地到实际 walk-forward 输出：
+
+```bash
+sh tune.sh v1.3.9 ensemble-lowvol --windows 12 --skip-final
+```
+
+这个命令默认复用 `v1.2.13 noid` 和 `v1.3.2 noid-rank-replace` 的已训练窗口模型，不重新训练。
+
+`v1.3.9 ensemble-lowvol` 已完成 12 窗口验证，均值约 `0.030457`，最差窗口约 `-0.032689`，高于 `v1.2.13 noid` 的均值 `0.024783` 和最差窗口 `-0.063489`。这说明“两模型 top5 并集 + 低波动重排”比单模型低波动后处理更有希望。
+
+注意：该 profile 只是复用已有源模型。如果不加 `--skip-final`，最终预测阶段需要 `v1.2.13` 和 `v1.3.2` 都存在 `final/model/best_model.pth` 与 `scaler.pkl`。当前本机这两个源实验只有窗口模型，没有最终模型，因此 `ensemble-lowvol` 暂时用于历史验证；正式提交前要先补齐源实验最终模型。
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 

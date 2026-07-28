@@ -41,6 +41,10 @@ case "${1:-}" in
     profile="noid-lowvol"
     shift
     ;;
+  ensemble-lowvol|ensemble|--ensemble-lowvol|--ensemble)
+    profile="ensemble-lowvol"
+    shift
+    ;;
   noid-marketrel|marketrel|--noid-marketrel|--marketrel)
     profile="noid-marketrel"
     shift
@@ -415,6 +419,15 @@ case "$profile" in
     set_default BDC_TORCH_NUM_THREADS 4
     set_default BDC_TENSORBOARD 0
     ;;
+  ensemble-lowvol)
+    set_default BDC_WF_WINDOWS 3
+    set_default BDC_ENSEMBLE_SOURCES v1.2.13,v1.3.2
+    set_default BDC_SELECTION_STRATEGY ensemble_low_vol_top5
+    set_default BDC_STAGE2_VOL_WINDOW 20
+    set_default BDC_NUM_PROCESSES 6
+    set_default BDC_TORCH_NUM_THREADS 4
+    set_default BDC_TENSORBOARD 0
+    ;;
   smooth)
     set_default BDC_WF_WINDOWS 3
     set_default BDC_FEATURE_NUM 39
@@ -535,7 +548,7 @@ case "$profile" in
     set_default BDC_TENSORBOARD 0
     ;;
   *)
-    echo "未知 tune profile: $profile，可选 quick、balanced、noid、noid-lowvol、noid-marketrel、noid-rank、noid-rank-lite、noid-rank-replace、noid-stable、noid-full、smooth、stable、large、full。" >&2
+    echo "未知 tune profile: $profile，可选 quick、balanced、noid、noid-lowvol、ensemble-lowvol、noid-marketrel、noid-rank、noid-rank-lite、noid-rank-replace、noid-stable、noid-full、smooth、stable、large、full。" >&2
     exit 2
     ;;
 esac
