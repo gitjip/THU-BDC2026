@@ -209,6 +209,16 @@ BDC_ENSEMBLE_SOURCES=v1.4.1,v1.4.2 sh tune.sh v1.4.3 ensemble-lowvol --windows 1
 
 18 窗口下 `ensemble-lowvol` 均值约 `0.017967`，高于 noid 的 `0.007921`，但低于 rank-replace 的 `0.020982`；最差窗口约 `-0.045579`，优于两个源模型。结论是：它仍可作为防守型候选，但还不能视为已证明的默认提交主线。
 
+使用更新到 `2026-07-27` 的 `stock_data` 后，`v1.4.4`、`v1.4.5`、`v1.4.6` 补跑了 24 窗口：
+
+```bash
+sh tune.sh v1.4.4 noid --windows 24 --skip-final
+sh tune.sh v1.4.5 noid-rank-replace --windows 24 --skip-final
+BDC_ENSEMBLE_SOURCES=v1.4.4,v1.4.5 sh tune.sh v1.4.6 ensemble-lowvol --windows 24 --skip-final
+```
+
+24 窗口下 `rank-replace` 均值约 `0.017557`，`ensemble-lowvol` 约 `0.014062`，`noid` 约 `0.002716`。最新 2 个窗口三者都为负，说明近期验证段更难；当前不建议因为 12 窗口结果就把 `ensemble-lowvol` 当成已证明默认提交主线。
+
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 
 `manifest.json` 中 `tune_env` 记录的是 profile 写入的环境变量；如果命令行传了 `--windows 12` 这类参数，实际生效值看 `walk_forward_args` 和 `windows` 列表。`summary.csv` 中的行数也是实际完成窗口数。
