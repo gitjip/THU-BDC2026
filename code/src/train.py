@@ -12,6 +12,7 @@ from model import StockTransformer
 from utils import engineer_features_39, engineer_features_158plus39
 from utils import create_ranking_dataset_vectorized
 from utils import apply_market_relative_features
+from utils import apply_trend_quality_features
 from utils import apply_cross_sectional_rank_features
 import joblib
 import os
@@ -126,6 +127,18 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
             "%s: 已添加市场相对特征 %s 个，输入特征=%s",
             desc,
             len(market_relative_columns),
+            len(feature_columns),
+        )
+
+    if config.get('use_trend_quality_features', False):
+        processed, feature_columns, trend_quality_columns = apply_trend_quality_features(
+            processed,
+            feature_columns,
+        )
+        logger.info(
+            "%s: 已添加趋势质量特征 %s 个，输入特征=%s",
+            desc,
+            len(trend_quality_columns),
             len(feature_columns),
         )
 

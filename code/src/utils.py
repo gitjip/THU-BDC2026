@@ -80,6 +80,14 @@ MARKET_RELATIVE_FEATURE_SPECS = [
     ('volatility_20', 'mkt_rel_volatility_20', 'median_ratio'),
 ]
 
+TREND_QUALITY_FEATURE_COLUMNS = [
+    'tq_mom5_vol10',
+    'tq_mom10_vol20',
+    'tq_close_pos20',
+    'tq_drawdown20',
+    'tq_up_ratio10',
+]
+
 
 def cross_sectional_rank_feature_names(columns=None):
     source_columns = columns or CROSS_SECTIONAL_RANK_BASE_COLUMNS
@@ -207,6 +215,59 @@ def add_market_relative_features(df, specs=None):
 
 def apply_market_relative_features(df, feature_columns):
     processed, added_columns = add_market_relative_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
+
+
+def add_trend_quality_features(df):
+    """Add per-stock past-only trend quality features."""
+    required_columns = {'股票代码', '日期', '收盘', 'return_1', 'return_5', 'return_10', 'volatility_10', 'volatility_20'}
+    missing = required_columns - set(df.columns)
+    if missing:
+        return df.copy(), []
+
+    result = df.copy()
+    result = result.sort_values(['股票代码', '日期']).reset_index(drop=True)
+    close = pd.to_numeric(result['收盘'], errors='coerce')
+    ret1 = pd.to_numeric(result['return_1'], errors='coerce')
+    ret5 = pd.to_numeric(result['return_5'], errors='coerce')
+    ret10 = pd.to_numeric(result['return_10'], errors='coerce')
+    vol10 = pd.to_numeric(result['volatility_10'], errors='coerce')
+    vol20 = pd.to_numeric(result['volatility_20'], errors='coerce')
+    groups = result.groupby('股票代码', sort=False)
+
+    rolling_high20 = groups['收盘'].transform(
+        lambda values: pd.to_numeric(values, errors='coerce').rolling(20, min_periods=5).max()
+    )
+    rolling_low20 = groups['收盘'].transform(
+        lambda values: pd.to_numeric(values, errors='coerce').rolling(20, min_periods=5).min()
+    )
+    range20 = rolling_high20 - rolling_low20
+    up_ratio10 = ret1.gt(0).astype(float).groupby(result['股票代码']).transform(
+        lambda values: values.rolling(10, min_periods=5).mean()
+    )
+
+    result['tq_mom5_vol10'] = ret5 / vol10.where(vol10.abs() > 1e-6)
+    result['tq_mom10_vol20'] = ret10 / vol20.where(vol20.abs() > 1e-6)
+    result['tq_close_pos20'] = (close - rolling_low20) / range20.where(range20.abs() > 1e-12)
+    result['tq_drawdown20'] = close / rolling_high20.where(rolling_high20.abs() > 1e-12) - 1.0
+    result['tq_up_ratio10'] = up_ratio10
+
+    for column in TREND_QUALITY_FEATURE_COLUMNS:
+        result[column] = (
+            pd.to_numeric(result[column], errors='coerce')
+            .replace([np.inf, -np.inf], np.nan)
+            .clip(lower=-10.0, upper=10.0)
+            .fillna(0.0)
+            .astype(float)
+        )
+
+    return result, list(TREND_QUALITY_FEATURE_COLUMNS)
+
+
+def apply_trend_quality_features(df, feature_columns):
+    processed, added_columns = add_trend_quality_features(df)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns

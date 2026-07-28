@@ -60,6 +60,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-rank` | 去编号+横截面rank | 3 | 39(no instrument)+rank | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-lite` | 去编号+小范围rank替代 | 3 | 39(no instrument, 7 rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-replace` | 去编号+rank替代绝对量价 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-trendq` | rank替代+趋势质量 | 3 | 39(no instrument, rank replace)+5 trendq | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 30 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
 | `noid-lowvol` | 去编号+低波动后处理 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, low-vol selection | 30 |
@@ -79,7 +80,9 @@ sh tune.sh quick --skip-final --resume
 
 `noid-rank-lite` 是 `noid-rank-replace` 的小范围版本：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`、`BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite`，只替换开高低收、成交量、成交额和涨跌额 7 个原始价量尺度列。
 
-`noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。`v1.3.2` 12 窗口几乎打平 noid，说明它比追加式 rank 合理，但暂时不作为默认主线。
+`noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。`v1.4.7/8` 公平预算复核后，它是当前最强单模型候选，也是默认提交配置。
+
+`noid-rank-trendq` 基于 `noid-rank-replace`，追加 5 个趋势质量特征：波动调整动量、20 日区间位置、20 日回撤和 10 日上涨占比。它用于测试“上涨质量”能否改善 rank-replace 的 top20/top50 排序，不改变模型结构。`v1.4.9` 最新 3 窗口短测均值约 `-0.067912`，相对同日期 `v1.4.5 noid-rank-replace` 平均低约 `0.048780`，不建议扩跑。
 
 `noid-stable` 是 `noid` 的正则化对照：继续移除 `instrument`，同时设置 `dropout=0.2`、`weight_decay=1e-4`。它用于检查 `noid` 倾向高波动股票的问题是否能通过更强正则化缓解。
 
@@ -97,7 +100,7 @@ sh tune.sh quick --skip-final --resume
 
 `v1.2.15 balanced` 与 `v1.2.13 noid` 的 12 窗口对照显示，移除 `instrument` 后均值和多数窗口表现更好。两者 epoch 上限不同，但最佳 epoch 都没有超过 15，因此结论仍有参考价值；若后续重新研究 `instrument`，应使用当前统一预算重跑。`v1.3.0 noid-rank` 最近 3 窗口均值明显变差，因此不要直接扩到 12 窗口。
 
-`v1.3.2 noid-rank-replace` 已跑完 12 窗口，和 noid 基本打平。当前主基线仍是 `v1.2.13 noid`；已有结果不用重跑，如果只是复核，使用新的版本号运行 `noid`，不要复用已存在的 `v1.2.13` 目录。
+`v1.3.2 noid-rank-replace` 的 12 窗口和 noid 基本打平；后续 `v1.4.5/v1.4.7/v1.4.8` 的 24 窗口公平复核后，`noid-rank-replace` 已成为当前默认提交单模型。如果只是复核已有方向，使用新的版本号运行，不要复用已存在的实验目录。
 
 `v1.3.3 noid-marketrel` 已跑完最近 3 窗口，均值约 `-0.036034`，全弱于同窗口 noid，不建议扩跑 12 窗口。
 
@@ -131,6 +134,7 @@ sh tune.sh v1.3.3 noid-marketrel --windows 3 --skip-final
 sh tune.sh v1.3.0 noid-rank --windows 3 --skip-final
 sh tune.sh v1.3.4 noid-rank-lite --windows 3 --skip-final
 sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
+sh tune.sh v1.4.9 noid-rank-trendq --windows 3 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final
 sh tune.sh v1.2.14 noid-full --windows 3 --skip-final
 sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2.13

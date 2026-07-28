@@ -27,6 +27,7 @@ fast_dev_mode = _env_bool('BDC_FAST_DEV', False)
 sequence_length = _env_int('BDC_SEQUENCE_LENGTH', 30 if fast_dev_mode else 60)
 feature_num = os.environ.get('BDC_FEATURE_NUM', '39' if fast_dev_mode else '158+39')
 use_market_relative_features = _env_bool('BDC_USE_MARKET_RELATIVE_FEATURES', False)
+use_trend_quality_features = _env_bool('BDC_USE_TREND_QUALITY_FEATURES', False)
 selection_strategy = os.environ.get('BDC_SELECTION_STRATEGY', 'model_top5').strip().lower()
 use_cross_sectional_rank_features_flag = _env_bool('BDC_USE_CROSS_SECTIONAL_RANKS', False)
 rank_mode_value = os.environ.get('BDC_CROSS_SECTIONAL_RANK_MODE')
@@ -56,6 +57,8 @@ if use_cross_sectional_rank_features:
     feature_dir_label = f'{feature_dir_label}_{rank_label}'
 if use_market_relative_features:
     feature_dir_label = f'{feature_dir_label}_mktrel'
+if use_trend_quality_features:
+    feature_dir_label = f'{feature_dir_label}_trendq'
 output_dir_prefix = 'debug_' if fast_dev_mode else ''
 config = {
     'sequence_length': sequence_length,   # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
@@ -88,6 +91,7 @@ config = {
     'dropout': _env_float('BDC_DROPOUT', 0.1),
     'use_instrument_feature': _env_bool('BDC_USE_INSTRUMENT_FEATURE', True),
     'use_market_relative_features': use_market_relative_features,
+    'use_trend_quality_features': use_trend_quality_features,
     'selection_strategy': selection_strategy,
     'stage2_pool_size': _env_int('BDC_STAGE2_POOL_SIZE', 10),
     'stage2_vol_window': _env_int('BDC_STAGE2_VOL_WINDOW', 20),

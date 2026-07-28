@@ -109,7 +109,7 @@ experiments/analysis/candidate_pool_v1.2.13_vs_v1.3.2/
 - `noid` 的 top50 后验收益均值约 `0.011429`，`rank-replace` 约 `0.003382`；
 - 两者 top5 平均重合度约 `38.3%`，top20 平均重合度约 `47.1%`。
 
-当前结论：`rank-replace` 虽然把最差 top5 窗口略抬高，但 broader ranking 明显弱于 `noid`。主基线仍应优先看 `noid`。`rank-replace` 可作为候选池多样性来源，但不能简单替代主线。
+当时结论：`rank-replace` 虽然把最差 top5 窗口略抬高，但 broader ranking 明显弱于 `noid`，所以先作为候选池多样性来源。后续 24 窗口公平复核显示 `rank-replace` 的 top5 均值和最差窗口都优于 noid 与当前集成，因此现在把它作为默认提交单模型。
 
 简单集成也不能直接上：
 
@@ -229,7 +229,7 @@ experiments/analysis/validation_v1.4.1_vs_v1.4.2_vs_v1.4.3/
 - `ensemble-lowvol` 仍改善了 noid，并且最差窗口最温和，说明低波动并集重排有一定防守价值；
 - 但 18 窗口均值低于 `rank-replace`，没有通过“均值高于两个源模型”的验收线；
 - 新增早期窗口拖累了 ensemble，说明 12 窗口结论偏乐观，不能只凭 `v1.3.9` 把它视为已证明默认主线；
-- 提交前应保留 `BDC_SUBMISSION_MODE=single` 回退复核，或者继续用更多窗口/其他指标证明集成优于单模型。
+- 提交前应保留 `rank-replace` 单模型作为默认路径，`single` 原始单模型和 `ensemble` 只作为回退或候选复核。
 
 候选池二阶段诊断也显示，18 窗口下 `low_vol_then_rank_top5` 不再是最强规则：
 
@@ -280,6 +280,8 @@ BDC_ENSEMBLE_SOURCES=v1.4.7,v1.4.5 sh tune.sh v1.4.8 ensemble-lowvol --windows 2
 `v1.4.7` 与旧 `v1.4.4` 逐窗口分数完全一致，`v1.4.8` 与旧 `v1.4.6` 也完全一致。这说明旧 noid 的 15 epoch 上限没有实际截断最佳模型；公平预算复核后，`rank-replace` 仍是当前更强的单模型候选。
 
 候选池诊断显示 `v1.4.7` 和 `v1.4.5` 的 top5 平均重合率约 `29.2%`，二者确实提供了多样性。但两模型并集低波动重排均值仍低于 `rank-replace`，说明当前二阶段过滤没有充分利用这种多样性。`rank-replace` 的 broader ranking 也不强：平均 Spearman 约 `-0.0766`，top20/top50 后验收益接近 0 或为负。因此下一步优先提升源模型信号，而不是继续调低波动重排规则。
+
+`v1.4.9 noid-rank-trendq` 对这个方向做了小步特征短测：在 `rank-replace` 上追加 5 个趋势质量特征。最新 3 个目标窗口均值约 `-0.067912`，同日期 `v1.4.5 rank-replace` 约 `-0.019132`，`v1.4.8 ensemble-lowvol` 约 `-0.022241`；逐窗口相对两者都是 `0/3` 胜出。平均 Spearman 约 `-0.2000`，top20 后验收益约 `-0.047259`，没有显示完整排序改善。结论：不扩跑 trendq，下一步应避免继续堆相近的短期动量/波动派生列。
 
 ## 6. v1.3.4 rank-lite 诊断结论
 

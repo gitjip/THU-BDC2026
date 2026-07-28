@@ -114,13 +114,13 @@ Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top
 - 同窗口比较，replace 在 `6/12` 个窗口更好、`6/12` 个窗口更差；
 - 选股集中度没有明显改善，12 窗口仍只选到 31 只不同股票，`688521` 仍高频出现。
 
-当前结论：替代式 rank 明显优于追加式 rank，但没有稳定超过 noid。它可以保留为候选实验档，不应替代当前主基线。后续特征工程细节见 [feature_engineering.md](feature_engineering.md)。
+当时结论：替代式 rank 明显优于追加式 rank，但没有稳定超过 noid，因此先保留为候选实验档。后续 `v1.4.5/v1.4.7/v1.4.8` 的 24 窗口公平复核更新了判断：`noid-rank-replace` 是当前最强单模型候选，并已作为默认提交配置。后续特征工程细节见 [feature_engineering.md](feature_engineering.md)。
 
 `v1.3.3 noid-marketrel` 追加 8 个市场相对特征后，最近 3 窗口均值约 `-0.036034`，全弱于同窗口 noid，不建议扩跑 12 窗口。训练 loss 和梯度范数没有明显异常，问题更像特征把模型带向了外部收益更差的选股池。
 
 `v1.3.4 noid-rank-lite` 只替换开高低收、成交量、成交额和涨跌额 7 个原始价量尺度列，最近 3 窗口均值约 `-0.018936`，只在 `1/3` 个窗口好于 noid。它比 marketrel 好，但仍明显弱于 noid 和 22 列 `noid-rank-replace`，不建议扩跑 12 窗口。
 
-当前结论：`v1.3.3` 和 `v1.3.4` 都没有显示出继续细分相对特征的价值。主基线继续用 `noid`；`noid-rank-replace` 可保留为候选，但不要把 rank-lite 或 marketrel 升为默认。
+当前结论：`v1.3.3` 和 `v1.3.4` 都没有显示出继续细分相对特征的价值。后续 24 窗口复核后，主提交配置已改为 `noid-rank-replace`；不要把 rank-lite 或 marketrel 升为默认。
 
 ## 10. 当前策略
 
@@ -226,6 +226,8 @@ sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 可比性复核：`v1.4.4 noid` 使用旧 15 epoch 上限，`v1.4.5 noid-rank-replace` 使用 30 epoch 上限；`v1.4.5` 中有窗口最佳 epoch 到 16，说明较大上限可能影响结论。从 `v1.4.7` 起已修正 profile 和正式集成源模型配置。
 
 `v1.4.7 noid` 补跑后与旧 `v1.4.4` 逐窗口完全一致，说明 noid 弱不是 15 epoch 截断造成的。公平预算下，`v1.4.5 rank-replace` 仍高于 noid；但 `v1.4.8 ensemble-lowvol` 仍低于 rank-replace。因此训练过程层面的下一步不是继续加 epoch，而是回到特征和排序信号质量。
+
+`v1.4.9 noid-rank-trendq` 追加趋势质量特征后，最新 3 窗口均值约 `-0.067912`，相对同日期 `v1.4.5 rank-replace` 平均低约 `0.048780`，且 3 个窗口都未胜出。这个结果更像特征噪声或重复信号，不像训练过程欠优化；不建议用更多 epoch 或更大模型去补救这组特征。
 
 ## 12. 平台期和震荡判断
 

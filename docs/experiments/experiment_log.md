@@ -19,8 +19,7 @@
 - `v1.4.4/5/6` 的 24 窗口结论需要降级为参考：`v1.4.4 noid` 使用旧 15 epoch 上限，`v1.4.5 rank-replace` 使用 30 epoch，且 rank-replace 有窗口最佳 epoch 到 16。
 - `v1.4.7` 起修正 noid 主线训练预算：`noid`、`noid-stable`、`noid-lowvol` 和正式集成源模型里的 noid 都使用 30 epoch 上限。
 - `v1.4.7/8` 复核后确认：noid 提高到 30 epoch 后与旧 noid 24 窗口结果完全一致，`rank-replace` 相对 noid 的优势不是由 epoch 上限造成的；但 `ensemble-lowvol` 仍低于 `rank-replace`。
-- 当前代码正式入口仍默认两模型集成；若临近提交且没有新的证据反转，应优先考虑把提交默认切到 `rank-replace` 单模型，或至少保留明确的单模型提交命令做最终复核。
-- `v1.4.0` 起正式 `train.sh/test.sh` 默认使用两模型集成，不再依赖 `experiments/` 中的历史窗口模型；但提交前仍应保留单模型回退复核。
+- `v1.4.9` 起正式 `train.sh/test.sh` 默认改为 `rank-replace` 单模型；两模型集成保留为 `ensemble` 可选模式。
 
 ## 版本记录
 
@@ -55,6 +54,7 @@
 | `v1.4.6` | `ensemble-lowvol` 24 窗口，数据至 2026-07-27 | 24 | `0.014062` | 继续优于旧 noid，但低于 rank-replace；由于源 noid 预算较小，不支持直接下最终结论。 |
 | `v1.4.7` | `noid` 30 epoch 公平预算复核 | 24 | `0.002716` | 与 `v1.4.4` 逐窗口完全一致；noid 弱不是 15 epoch 截断造成的。 |
 | `v1.4.8` | `ensemble-lowvol` 使用 `v1.4.7+v1.4.5` | 24 | `0.014062` | 与 `v1.4.6` 完全一致；优于 noid，但低于 rank-replace，不建议作为当前默认提交主线。 |
+| `v1.4.9` | 默认提交入口切到 rank-replace，新增 trend-quality 短测 | 3 | `-0.067912` | `train.sh/test.sh` 默认使用 `model/rank_replace`；`noid-rank-trendq` 最新 3 窗口全负，均值低于同日期 `v1.4.5` 约 `0.048780`，不扩跑。 |
 
 ## 后续记录规范
 

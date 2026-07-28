@@ -32,6 +32,7 @@ FEATURE_OR_STRATEGY_KEYS = {
     "BDC_TUNE_PROFILE",
     "BDC_USE_INSTRUMENT_FEATURE",
     "BDC_USE_MARKET_RELATIVE_FEATURES",
+    "BDC_USE_TREND_QUALITY_FEATURES",
     "BDC_USE_CROSS_SECTIONAL_RANKS",
     "BDC_CROSS_SECTIONAL_RANK_MODE",
     "BDC_CROSS_SECTIONAL_RANK_REPLACE_SET",
@@ -86,6 +87,12 @@ def read_score_summary(experiment_dir: Path) -> pd.DataFrame:
     frame = pd.read_csv(path)
     if "window" not in frame or "score" not in frame:
         raise ValueError(f"{path} must contain window and score columns")
+    if {"target_start_date", "target_end_date"}.issubset(frame.columns):
+        frame["match_key"] = frame["target_start_date"].astype(str) + "__" + frame["target_end_date"].astype(str)
+        frame["match_label"] = frame["target_start_date"].astype(str) + " ~ " + frame["target_end_date"].astype(str)
+    else:
+        frame["match_key"] = frame["window"].astype(str)
+        frame["match_label"] = frame["window"].astype(str)
     frame["experiment"] = experiment_label(experiment_dir)
     return frame
 
@@ -95,6 +102,10 @@ def read_diagnostics_summary(experiment_dir: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"missing prediction_diagnostics_summary.csv: {path}")
     frame = pd.read_csv(path)
+    if {"target_start_date", "target_end_date"}.issubset(frame.columns):
+        frame["match_key"] = frame["target_start_date"].astype(str) + "__" + frame["target_end_date"].astype(str)
+    else:
+        frame["match_key"] = frame["window"].astype(str)
     frame["experiment"] = experiment_label(experiment_dir)
     return frame
 
@@ -143,12 +154,26 @@ def build_config_comparison(experiment_dirs: list[Path]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_summary_rows(experiment_dirs: list[Path]) -> pd.DataFrame:
+def get_common_match_keys(experiment_dirs: list[Path]) -> list[str]:
+    key_sets = [set(read_score_summary(path)["match_key"]) for path in experiment_dirs]
+    common = set.intersection(*key_sets)
+    first = read_score_summary(experiment_dirs[0])
+    return [key for key in first["match_key"].tolist() if key in common]
+
+
+def filter_by_match_keys(frame: pd.DataFrame, match_keys: list[str]) -> pd.DataFrame:
+    if not match_keys or "match_key" not in frame:
+        return frame
+    return frame[frame["match_key"].isin(match_keys)].copy()
+
+
+def build_summary_rows(experiment_dirs: list[Path], match_keys: list[str]) -> pd.DataFrame:
     rows = []
     for experiment_dir in experiment_dirs:
-        scores = read_score_summary(experiment_dir)
-        diagnostics = read_diagnostics_summary(experiment_dir)
-        repeated = read_repeated_summary(experiment_dir)
+        all_scores = read_score_summary(experiment_dir)
+        scores = filter_by_match_keys(all_scores, match_keys)
+        diagnostics = filter_by_match_keys(read_diagnostics_summary(experiment_dir), match_keys)
+        repeated = read_repeated_summary(experiment_dir) if len(scores) == len(all_scores) else {}
         score = pd.to_numeric(scores["score"], errors="coerce")
         market = pd.to_numeric(scores.get("market_equal_weight"), errors="coerce") if "market_equal_weight" in scores else None
         rows.append(
@@ -175,13 +200,17 @@ def build_summary_rows(experiment_dirs: list[Path]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_paired_diffs(experiment_dirs: list[Path], ensemble_label: str) -> pd.DataFrame:
-    score_frames = {
-        experiment_label(path): read_score_summary(path)[["window", "score", "market_equal_weight"]].rename(
-            columns={"score": experiment_label(path)}
+def build_paired_diffs(experiment_dirs: list[Path], ensemble_label: str, match_keys: list[str]) -> pd.DataFrame:
+    score_frames = {}
+    for path in experiment_dirs:
+        label = experiment_label(path)
+        frame = filter_by_match_keys(read_score_summary(path), match_keys)
+        columns = ["match_key", "match_label", "window", "score"]
+        if "market_equal_weight" in frame:
+            columns.append("market_equal_weight")
+        score_frames[label] = frame[columns].rename(
+            columns={"window": f"{label}_window", "score": label}
         )
-        for path in experiment_dirs
-    }
     if ensemble_label not in score_frames:
         raise ValueError(f"ensemble label not found: {ensemble_label}")
 
@@ -189,17 +218,18 @@ def build_paired_diffs(experiment_dirs: list[Path], ensemble_label: str) -> pd.D
     for label, frame in score_frames.items():
         if label == ensemble_label:
             continue
-        merged = merged.merge(frame[["window", label]], on="window", how="inner")
+        merged = merged.merge(frame[["match_key", f"{label}_window", label]], on="match_key", how="inner")
         merged[f"{ensemble_label}_minus_{label}"] = merged[ensemble_label] - merged[label]
         merged[f"{ensemble_label}_beats_{label}"] = merged[f"{ensemble_label}_minus_{label}"] > 0
     return merged
 
 
-def build_diagnostic_summary(experiment_dirs: list[Path]) -> pd.DataFrame:
+def build_diagnostic_summary(experiment_dirs: list[Path], match_keys: list[str]) -> pd.DataFrame:
     rows = []
     for experiment_dir in experiment_dirs:
-        diagnostics = read_diagnostics_summary(experiment_dir)
-        repeated = read_repeated_summary(experiment_dir)
+        all_scores = read_score_summary(experiment_dir)
+        diagnostics = filter_by_match_keys(read_diagnostics_summary(experiment_dir), match_keys)
+        repeated = read_repeated_summary(experiment_dir) if len(diagnostics) == len(all_scores) else {}
         rows.append(
             {
                 "experiment": experiment_label(experiment_dir),
@@ -235,11 +265,11 @@ def judge(summary: pd.DataFrame, paired: pd.DataFrame, ensemble_label: str) -> l
             lines.append(f"- 相对 `{target}`：平均差值 `{mean_diff:.6f}`，胜出窗口 `{win_count}/{len(paired)}`。")
 
     if float(ensemble["mean_score"]) > best_baseline_mean and float(ensemble["min_score"]) >= best_baseline_min - 0.01:
-        lines.append("- 结论：支持继续使用 `ensemble-lowvol`。")
+        lines.append(f"- 结论：支持继续使用 `{ensemble_label}`。")
     elif float(ensemble["mean_score"]) > best_baseline_mean:
-        lines.append("- 结论：均值支持 `ensemble-lowvol`，但最差窗口需要谨慎复核。")
+        lines.append(f"- 结论：均值支持 `{ensemble_label}`，但最差窗口需要谨慎复核。")
     else:
-        lines.append("- 结论：暂不支持 `ensemble-lowvol` 作为默认提交主线。")
+        lines.append(f"- 结论：暂不支持 `{ensemble_label}` 作为默认提交主线。")
     return lines
 
 
@@ -260,7 +290,7 @@ def write_readme(
     lines = [
         "# 验证汇总",
         "",
-        "本文比较同一批 walk-forward 窗口上的多个实验。",
+        "本文比较同一批 walk-forward 目标窗口上的多个实验。",
         "",
         "## 实验",
         "",
@@ -273,9 +303,11 @@ def write_readme(
             "## 文件",
             "",
             "- `summary.csv`：总体分数指标。",
-            "- `paired_diffs.csv`：集成相对源模型的逐窗口差值。",
+            "- `paired_diffs.csv`：候选实验相对其它实验的逐窗口差值；优先按目标日期对齐，缺少目标日期时才按窗口编号对齐。",
             "- `diagnostic_summary.csv`：排序诊断聚合指标。",
             "- `config_comparison.csv`：关键配置差异，用于判断是否是严格公平对照。",
+            "",
+            f"共同目标窗口数量：`{len(paired)}`。",
             "",
             "## 可比性提示",
             "",
@@ -338,9 +370,12 @@ def main() -> None:
     output_dir = resolve_path(args.output_dir) if args.output_dir else default_output_dir(experiment_dirs)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    summary = build_summary_rows(experiment_dirs)
-    paired = build_paired_diffs(experiment_dirs, ensemble_label=ensemble_label)
-    diagnostic = build_diagnostic_summary(experiment_dirs)
+    match_keys = get_common_match_keys(experiment_dirs)
+    if not match_keys:
+        raise ValueError("no common validation windows found")
+    summary = build_summary_rows(experiment_dirs, match_keys)
+    paired = build_paired_diffs(experiment_dirs, ensemble_label=ensemble_label, match_keys=match_keys)
+    diagnostic = build_diagnostic_summary(experiment_dirs, match_keys)
     config_comparison = build_config_comparison(experiment_dirs)
     summary.to_csv(output_dir / "summary.csv", index=False)
     paired.to_csv(output_dir / "paired_diffs.csv", index=False)

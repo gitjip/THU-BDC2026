@@ -24,6 +24,7 @@ from stage2_selection import normalize_selection_strategy, select_predictions
 from utils import (
 	apply_cross_sectional_rank_features,
 	apply_market_relative_features,
+	apply_trend_quality_features,
 	engineer_features_39,
 	engineer_features_158plus39,
 )
@@ -168,6 +169,16 @@ def preprocess_predict_data(df, stockid2idx):
 		logger.info(
 			"预测集: 已添加市场相对特征 %s 个，输入特征=%s",
 			len(market_relative_columns),
+			len(feature_columns),
+		)
+	if config.get('use_trend_quality_features', False):
+		processed, feature_columns, trend_quality_columns = apply_trend_quality_features(
+			processed,
+			feature_columns,
+		)
+		logger.info(
+			"预测集: 已添加趋势质量特征 %s 个，输入特征=%s",
+			len(trend_quality_columns),
 			len(feature_columns),
 		)
 	if config.get('use_cross_sectional_rank_features', False):
