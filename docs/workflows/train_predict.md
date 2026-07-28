@@ -35,20 +35,22 @@ sh train.sh
 训练时会：
 
 1. 读取 `stock_data`；
-2. 统一股票代码为 6 位字符串；
-3. 用最近 `val_days` 个可打标签交易日做验证集；
-4. 用未来第 1 个到第 5 个交易日开盘价计算标签；
-5. 按验证集 `final_score` 保存最佳模型；
-6. 根据验证表现自动降低学习率，并在连续无明显提升时早停；
-7. 保存模型、标准化器和日志。
+2. 依次训练 `noid` 和 `noid_rank_replace` 两个源模型；
+3. 统一股票代码为 6 位字符串；
+4. 用最近 `val_days` 个可打标签交易日做验证集；
+5. 用未来第 1 个到第 5 个交易日开盘价计算标签；
+6. 按验证集 `final_score` 保存最佳模型；
+7. 根据验证表现自动降低学习率，并在连续无明显提升时早停；
+8. 保存模型、标准化器和日志。
 
 主要输出：
 
-- `model/60_158+39/best_model.pth`
-- `model/60_158+39/scaler.pkl`
-- `model/60_158+39/config.json`
-- `model/60_158+39/final_score.txt`
-- `model/60_158+39/train.log`
+- `model/ensemble/noid/best_model.pth`
+- `model/ensemble/noid/scaler.pkl`
+- `model/ensemble/noid/config.json`
+- `model/ensemble/noid_rank_replace/best_model.pth`
+- `model/ensemble/noid_rank_replace/scaler.pkl`
+- `model/ensemble/noid_rank_replace/config.json`
 
 快速调试运行：
 
@@ -63,7 +65,7 @@ debug 模式默认会：
 - 验证集只取最近 5 个目标交易日；
 - 每个交易日固定抽样 60 只股票参与训练；
 - 最多训练 4 个 epoch，若验证分数连续 2 个 epoch 无明显提升会提前停止；
-- 保存到 `model/debug_30_39/`，不会覆盖正式模型；
+- 保存到 `model/ensemble_debug/`，不会覆盖正式模型；
 - 关闭 TensorBoard，减少调试时生成的文件。
 
 这样做是为了调试流程和代码错误，不是为了获得最佳成绩。完整训练仍使用 `sh train.sh`。
@@ -86,14 +88,15 @@ sh test.sh
 2026-08-03, 2026-08-04, 2026-08-05, 2026-08-06, 2026-08-07
 ```
 
-预测会读取不晚于提交截止日的最新可用历史数据，输出：
+预测会读取不晚于提交截止日的最新可用历史数据，先分别运行两个源模型，再做 top5 并集低波动重排，输出：
 
 ```text
 output/result.csv
 output/result_scores.csv
+output/ensemble_prediction.json
 ```
 
-`result.csv` 是比赛提交文件。`result_scores.csv` 是本地诊断文件，记录所有候选股票的模型排名和原始分数，用来排查模型是否总是选同一批股票；它不是提交目标。
+`result.csv` 是比赛提交文件。`result_scores.csv` 是本地诊断文件，记录集成后的候选排名、源模型排名、是否入选和风险指标；`ensemble_prediction.json` 记录源模型 top5、最终 top5 和候选池大小。后两个文件不是提交目标。
 
 如果要指定提交截止日或预测窗口候选起始日：
 
@@ -113,15 +116,16 @@ stock_id,weight
 600000,0.2
 ```
 
-最多 5 只股票，权重和不能超过 1。当前逻辑是取模型分数最高的 5 只股票，等权重 `0.2`。
+最多 5 只股票，权重和不能超过 1。当前默认逻辑是两个源模型各自取 top5，再从 top5 并集中按最近 20 个交易日历史波动率从低到高选回 5 只，等权重 `0.2`。
 
-默认选股策略是 `BDC_SELECTION_STRATEGY=model_top5`。如果要测试二阶段低波动后处理，可显式启用：
+如果要临时回退到单模型流程，可显式启用：
 
 ```bash
-BDC_SELECTION_STRATEGY=low_vol_then_rank_top5 BDC_STAGE2_POOL_SIZE=10 sh test.sh
+BDC_SUBMISSION_MODE=single sh train.sh
+BDC_SUBMISSION_MODE=single sh test.sh
 ```
 
-这个策略先取模型分数前 `BDC_STAGE2_POOL_SIZE` 只股票，再按提交截止日前最近 20 个交易日的历史波动率从低到高选回 5 只。它是实验选项，不是当前默认提交策略。
+单模型流程主要用于排错，不是当前默认提交策略。
 
 ## 5. 本地调试与自测
 
@@ -159,18 +163,20 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 
 配置文件：`code/src/config.py`
 
-- `sequence_length`：每只股票输入过去多少个交易日，默认 60。
+- `sequence_length`：每只股票输入过去多少个交易日；正式集成源模型默认 45，单模型配置默认 60。
 - `label_horizon`：标签跨度，默认未来第 5 个交易日。
 - `val_days`：训练过程内部验证集目标交易日数量，默认 5。
 - `train_target_days`：训练目标交易日数量限制，默认 0 表示不限制；debug 默认 24。
 - `max_stocks_per_day`：每个交易日抽样股票数，默认 0 表示不抽样；debug 默认 60。
-- `num_epochs`：最大训练轮数，默认 6；平时可用 `BDC_NUM_EPOCHS` 覆盖，早停可能提前结束。
-- `learning_rate`：默认完整训练 `2e-5`，debug `3e-5`；可用 `BDC_LEARNING_RATE` 覆盖。
+- `num_epochs`：最大训练轮数；正式集成中 `noid` 默认 15，`noid_rank_replace` 默认 30，早停可能提前结束。
+- `learning_rate`：正式集成源模型默认 `3e-5`，debug `3e-5`。
 - `lr_scheduler`：默认 `plateau`，验证 `final_score` 停滞时降低学习率。
 - `early_stopping_patience`：默认完整训练 3，debug 2；设为 0 可关闭早停。
 - `use_instrument_feature`：默认开启；可用 `BDC_USE_INSTRUMENT_FEATURE=0` 从模型输入中移除股票编号特征。
 - `use_market_relative_features`：默认关闭；可用 `BDC_USE_MARKET_RELATIVE_FEATURES=1` 追加市场相对特征。
-- `selection_strategy`：默认 `model_top5`；可用 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5` 启用低波动二阶段后处理。
+- `BDC_SUBMISSION_MODE`：默认 `ensemble`，即正式提交用两模型集成；设为 `single` 可回退旧单模型入口。
+- `BDC_ENSEMBLE_SELECTION_STRATEGY`：默认 `ensemble_low_vol_top5`，即两个源模型 top5 并集后按低波动重排。
+- `selection_strategy`：仅单模型或源模型预测使用，默认 `model_top5`；可用 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5` 启用单模型低波动二阶段后处理。
 - `stage2_pool_size`：默认 10；低波动后处理从模型前多少名中选回 5 只。
 - `stage2_vol_window`：默认 20；低波动后处理计算历史波动率的交易日窗口。
 - `use_cross_sectional_rank_features`：默认关闭；可用 `BDC_USE_CROSS_SECTIONAL_RANKS=1` 增加当日横截面百分位排名特征。
@@ -191,6 +197,8 @@ BDC_USE_INSTRUMENT_FEATURE=0 BDC_USE_CROSS_SECTIONAL_RANKS=1 sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite sh train.sh debug
 BDC_NUM_EPOCHS=30 BDC_LR_SCHEDULER=off BDC_EARLY_STOPPING_PATIENCE=0 sh tune.sh v1.2.10 noid --skip-final
+BDC_SUBMISSION_MODE=single sh train.sh
+BDC_SUBMISSION_MODE=single sh test.sh
 BDC_SELECTION_STRATEGY=low_vol_then_rank_top5 BDC_STAGE2_POOL_SIZE=10 sh test.sh
 BDC_SUBMISSION_DATE=2026-08-02 sh test.sh
 BDC_TARGET_START_DATE=2026-08-08 sh test.sh

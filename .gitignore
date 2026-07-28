@@ -21,10 +21,15 @@ wheels/
 
 # Generated training and prediction logs
 model/debug_*/
+model/ensemble*/
+model/ensemble_train.log
 model/*/train.log
 model/*/log/events.out.tfevents.*
 output/predict.log
+output/result_scores.csv
+output/ensemble_prediction.json
 temp/latest_score.csv
+temp/submission_ensemble/
 
 # Generated walk-forward experiment artifacts
 experiments/*

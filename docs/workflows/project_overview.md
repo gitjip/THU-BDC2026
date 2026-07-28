@@ -75,15 +75,15 @@
 - `training_history.csv`：逐 epoch 训练记录；
 - `train.log`：训练日志。
 
-### [predict.py](../../code/src/predict.py)
+### [ensemble_predict.py](../../code/src/ensemble_predict.py) 和 [predict.py](../../code/src/predict.py)
 
-推理主脚本，流程：
+正式推理入口 `test.sh` 默认调用 `ensemble_predict.py`，它会再调用 `predict.py` 分别运行两个源模型。流程：
 
 1. 加载历史数据，确定提交截止日和未来5个目标交易日；
-2. 执行与训练一致的特征工程；
-3. 加载 `scaler.pkl` 进行特征标准化；
-4. 用 `best_model.pth` 对全部可预测股票打分；
-5. 按分数降序取前5只，输出到 `output/result.csv`。
+2. 使用 `model/ensemble/noid` 和 `model/ensemble/noid_rank_replace` 分别对全部可预测股票打分；
+3. 取两个源模型 top5 的并集；
+4. 基于提交截止日前已知历史数据计算候选股票最近 20 个交易日收益波动率；
+5. 在并集中按低波动优先选回5只，输出到 `output/result.csv`。
 
 默认提交截止日为 `2026-08-02`。如果候选起始日不是交易日，代码会向后跳到合理交易日。`--as-of-date` 仅用于本地调试的数据截断，不能晚于提交截止日。
 
