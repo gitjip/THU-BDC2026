@@ -176,6 +176,8 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `BDC_SUBMISSION_MODE`：默认 `rank-replace`；设为 `single` 可回退原始单模型入口，设为 `ensemble` 可运行两模型集成候选。
 - `BDC_ENSEMBLE_SELECTION_STRATEGY`：仅集成模式使用，默认 `ensemble_low_vol_top5`，即两个源模型 top5 并集后按低波动重排。
 - `selection_strategy`：仅单模型或源模型预测使用，默认 `model_top5`；可用 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5` 启用单模型低波动二阶段后处理。
+- `top_k`：默认 5；可用 `BDC_TOP_K=3` 只输出前 3 只股票，范围 1 到 5。
+- `total_exposure`：默认 1.0；可用 `BDC_TOTAL_EXPOSURE=0.8` 控制总仓位，范围 0 到 1，未使用权重相当于现金。
 - `stage2_pool_size`：默认 10；低波动后处理从模型前多少名中选回 5 只。
 - `stage2_vol_window`：默认 20；低波动后处理计算历史波动率的交易日窗口。
 - `use_cross_sectional_rank_features`：默认关闭；可用 `BDC_USE_CROSS_SECTIONAL_RANKS=1` 增加当日横截面百分位排名特征。
@@ -199,6 +201,8 @@ BDC_NUM_EPOCHS=30 BDC_LR_SCHEDULER=off BDC_EARLY_STOPPING_PATIENCE=0 sh tune.sh 
 BDC_SUBMISSION_MODE=single sh train.sh
 BDC_SUBMISSION_MODE=single sh test.sh
 BDC_SELECTION_STRATEGY=low_vol_then_rank_top5 BDC_STAGE2_POOL_SIZE=10 sh test.sh
+BDC_TOP_K=3 BDC_TOTAL_EXPOSURE=1.0 sh test.sh
+BDC_TOP_K=5 BDC_TOTAL_EXPOSURE=0.8 sh test.sh
 BDC_SUBMISSION_DATE=2026-08-02 sh test.sh
 BDC_TARGET_START_DATE=2026-08-08 sh test.sh
 BDC_MARKET_HOLIDAYS=2026-08-03 sh test.sh

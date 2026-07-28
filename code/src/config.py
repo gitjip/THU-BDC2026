@@ -29,6 +29,12 @@ feature_num = os.environ.get('BDC_FEATURE_NUM', '39' if fast_dev_mode else '158+
 use_market_relative_features = _env_bool('BDC_USE_MARKET_RELATIVE_FEATURES', False)
 use_trend_quality_features = _env_bool('BDC_USE_TREND_QUALITY_FEATURES', False)
 selection_strategy = os.environ.get('BDC_SELECTION_STRATEGY', 'model_top5').strip().lower()
+top_k = _env_int('BDC_TOP_K', 5)
+if not 1 <= top_k <= 5:
+    raise ValueError(f"BDC_TOP_K must be between 1 and 5, current: {top_k}")
+total_exposure = _env_float('BDC_TOTAL_EXPOSURE', 1.0)
+if not 0.0 <= total_exposure <= 1.0:
+    raise ValueError(f"BDC_TOTAL_EXPOSURE must be between 0 and 1, current: {total_exposure}")
 use_cross_sectional_rank_features_flag = _env_bool('BDC_USE_CROSS_SECTIONAL_RANKS', False)
 rank_mode_value = os.environ.get('BDC_CROSS_SECTIONAL_RANK_MODE')
 if rank_mode_value in (None, ''):
@@ -93,6 +99,8 @@ config = {
     'use_market_relative_features': use_market_relative_features,
     'use_trend_quality_features': use_trend_quality_features,
     'selection_strategy': selection_strategy,
+    'top_k': top_k,
+    'total_exposure': total_exposure,
     'stage2_pool_size': _env_int('BDC_STAGE2_POOL_SIZE', 10),
     'stage2_vol_window': _env_int('BDC_STAGE2_VOL_WINDOW', 20),
     'use_cross_sectional_rank_features': use_cross_sectional_rank_features,

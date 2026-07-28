@@ -25,6 +25,25 @@ RISK_METRIC_COLUMNS = [
 ]
 
 
+def validate_submission_controls(top_k: int, total_exposure: float) -> tuple[int, float]:
+    top_k = int(top_k)
+    total_exposure = float(total_exposure)
+    if not 1 <= top_k <= 5:
+        raise ValueError(f"top_k must be between 1 and 5, current: {top_k}")
+    if not 0.0 <= total_exposure <= 1.0:
+        raise ValueError(f"total_exposure must be between 0 and 1, current: {total_exposure}")
+    return top_k, total_exposure
+
+
+def assign_equal_weights(annotated: pd.DataFrame, selected_ids: set[str], top_k: int, total_exposure: float) -> pd.DataFrame:
+    top_k, total_exposure = validate_submission_controls(top_k, total_exposure)
+    annotated = annotated.copy()
+    annotated["selected"] = annotated["stock_id"].isin(selected_ids)
+    annotated["weight"] = 0.0
+    annotated.loc[annotated["selected"], "weight"] = total_exposure / top_k
+    return annotated
+
+
 def normalize_selection_strategy(value: str | None) -> str:
     strategy = (value or MODEL_TOP5).strip().lower().replace("-", "_")
     aliases = {
@@ -169,12 +188,12 @@ def select_predictions(
     history: pd.DataFrame,
     strategy: str = MODEL_TOP5,
     top_k: int = 5,
+    total_exposure: float = 1.0,
     pool_size: int = 10,
     volatility_window: int = 20,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     strategy = normalize_selection_strategy(strategy)
-    if top_k <= 0:
-        raise ValueError("top_k must be positive")
+    top_k, total_exposure = validate_submission_controls(top_k, total_exposure)
     if pool_size < top_k:
         raise ValueError(f"BDC_STAGE2_POOL_SIZE must be >= {top_k}, current: {pool_size}")
 
@@ -204,9 +223,7 @@ def select_predictions(
     selected = selected.reset_index(drop=True)
     selected["stage2_selection_rank"] = range(1, len(selected) + 1)
     selected_ids = set(selected["stock_id"])
-    annotated["selected"] = annotated["stock_id"].isin(selected_ids)
-    annotated["weight"] = 0.0
-    annotated.loc[annotated["selected"], "weight"] = 1.0 / top_k
+    annotated = assign_equal_weights(annotated, selected_ids, top_k, total_exposure)
     rank_map = dict(zip(selected["stock_id"], selected["stage2_selection_rank"]))
     annotated["stage2_selection_rank"] = annotated["stock_id"].map(rank_map)
 
@@ -269,11 +286,11 @@ def select_ensemble_predictions(
     history: pd.DataFrame,
     strategy: str = ENSEMBLE_LOW_VOL_TOP5,
     top_k: int = 5,
+    total_exposure: float = 1.0,
     volatility_window: int = 20,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     strategy = normalize_ensemble_selection_strategy(strategy)
-    if top_k <= 0:
-        raise ValueError("top_k must be positive")
+    top_k, total_exposure = validate_submission_controls(top_k, total_exposure)
 
     combined = build_ensemble_scores(score_frames)
     candidates = combined[combined["top5_vote_count"] > 0].copy()
@@ -305,9 +322,7 @@ def select_ensemble_predictions(
     annotated["selection_strategy"] = strategy
     annotated["stage2_pool_member"] = annotated["top5_vote_count"] > 0
     annotated["stage2_selection_rank"] = annotated["stock_id"].map(rank_map)
-    annotated["selected"] = annotated["stock_id"].isin(selected_ids)
-    annotated["weight"] = 0.0
-    annotated.loc[annotated["selected"], "weight"] = 1.0 / top_k
+    annotated = assign_equal_weights(annotated, selected_ids, top_k, total_exposure)
     annotated = annotated.sort_values(
         ["selected", "stage2_selection_rank", "ensemble_rank_before_stage2"],
         ascending=[False, True, True],

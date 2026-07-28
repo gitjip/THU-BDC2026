@@ -63,6 +63,18 @@ def parse_args() -> argparse.Namespace:
         help="集成重排策略，默认 ensemble_low_vol_top5",
     )
     parser.add_argument(
+        "--top-k",
+        type=int,
+        default=int(os.environ.get("BDC_TOP_K", config.get("top_k", 5))),
+        help="提交股票数量，1到5之间，默认5",
+    )
+    parser.add_argument(
+        "--total-exposure",
+        type=float,
+        default=float(os.environ.get("BDC_TOTAL_EXPOSURE", config.get("total_exposure", 1.0))),
+        help="总仓位，0到1之间，默认1.0；小于1表示留现金",
+    )
+    parser.add_argument(
         "--stage2-vol-window",
         type=int,
         default=int(os.environ.get("BDC_STAGE2_VOL_WINDOW", ENSEMBLE_VOL_WINDOW)),
@@ -210,7 +222,8 @@ def main() -> None:
         score_frames,
         history=history,
         strategy=args.ensemble_selection_strategy,
-        top_k=5,
+        top_k=args.top_k,
+        total_exposure=args.total_exposure,
         volatility_window=args.stage2_vol_window,
     )
     selected[["stock_id", "weight"]].to_csv(output_path, index=False)
@@ -219,6 +232,8 @@ def main() -> None:
     metadata = {
         "mode": "submission_ensemble",
         "selection_strategy": args.ensemble_selection_strategy,
+        "top_k": args.top_k,
+        "total_exposure": args.total_exposure,
         "stage2_vol_window": args.stage2_vol_window,
         "target_dates": target_dates,
         "sources": [
@@ -237,7 +252,7 @@ def main() -> None:
 
     logger.info("集成候选池股票数: %s", metadata["candidate_count"])
     logger.info("源模型 Top5: %s", source_top5)
-    logger.info("最终 Top5: %s", ", ".join(metadata["selected"]))
+    logger.info("最终 Selected: %s", ", ".join(metadata["selected"]))
     logger.info("结果已写入: %s", output_path)
     logger.info("完整候选排名已写入: %s", scores_output_path)
     logger.info("集成预测耗时: %s", format_duration(total_predict_seconds))

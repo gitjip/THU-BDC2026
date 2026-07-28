@@ -118,6 +118,18 @@ def parse_args():
 		help='选股后处理策略，默认 model_top5；可选 low_vol_then_rank_top5',
 	)
 	parser.add_argument(
+		'--top-k',
+		type=int,
+		default=int(os.environ.get('BDC_TOP_K', config.get('top_k', 5))),
+		help='提交股票数量，1到5之间，默认5',
+	)
+	parser.add_argument(
+		'--total-exposure',
+		type=float,
+		default=float(os.environ.get('BDC_TOTAL_EXPOSURE', config.get('total_exposure', 1.0))),
+		help='总仓位，0到1之间，默认1.0；小于1表示留现金',
+	)
+	parser.add_argument(
 		'--stage2-pool-size',
 		type=int,
 		default=int(os.environ.get('BDC_STAGE2_POOL_SIZE', config.get('stage2_pool_size', 10))),
@@ -363,12 +375,13 @@ def main():
 		scores_df,
 		history=raw_df,
 		strategy=selection_strategy,
-		top_k=5,
+		top_k=args.top_k,
+		total_exposure=args.total_exposure,
 		pool_size=args.stage2_pool_size,
 		volatility_window=args.stage2_vol_window,
 	)
 
-	top5 = selected_df['stock_id'].tolist()
+	selected_stock_ids = selected_df['stock_id'].tolist()
 	output_df = selected_df[['stock_id', 'weight']].copy()
 	output_df.to_csv(output_path, index=False)
 
@@ -378,12 +391,14 @@ def main():
 
 	logger.info("参与排序股票数: %s", len(ranked_stock_ids))
 	logger.info(
-		"选股策略: %s | stage2_pool_size=%s | stage2_vol_window=%s",
+		"选股策略: %s | top_k=%s | total_exposure=%s | stage2_pool_size=%s | stage2_vol_window=%s",
 		selection_strategy,
+		args.top_k,
+		args.total_exposure,
 		args.stage2_pool_size,
 		args.stage2_vol_window,
 	)
-	logger.info("Top5: %s", ", ".join(top5))
+	logger.info("Selected: %s", ", ".join(selected_stock_ids))
 	logger.info("结果已写入: %s", output_path)
 	logger.info("完整候选排名已写入: %s", scores_output_path)
 

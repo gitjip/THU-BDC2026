@@ -59,6 +59,8 @@ NOTE_CONFIG_KEYS = [
     "BDC_USE_MARKET_RELATIVE_FEATURES",
     "BDC_USE_TREND_QUALITY_FEATURES",
     "BDC_SELECTION_STRATEGY",
+    "BDC_TOP_K",
+    "BDC_TOTAL_EXPOSURE",
     "BDC_STAGE2_POOL_SIZE",
     "BDC_STAGE2_VOL_WINDOW",
     "BDC_ENSEMBLE_SOURCES",
@@ -128,6 +130,13 @@ def parse_int_env(name: str, default: int) -> int:
     if value in (None, ""):
         return default
     return int(value)
+
+
+def parse_float_env(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value in (None, ""):
+        return default
+    return float(value)
 
 
 def parse_args() -> argparse.Namespace:
@@ -667,7 +676,8 @@ def write_ensemble_prediction(
         score_frames,
         history=history,
         strategy=strategy,
-        top_k=5,
+        top_k=parse_int_env("BDC_TOP_K", 5),
+        total_exposure=parse_float_env("BDC_TOTAL_EXPOSURE", 1.0),
         volatility_window=parse_int_env("BDC_STAGE2_VOL_WINDOW", 20),
     )
 
@@ -682,6 +692,8 @@ def write_ensemble_prediction(
 
     return {
         "selection_strategy": strategy,
+        "top_k": parse_int_env("BDC_TOP_K", 5),
+        "total_exposure": parse_float_env("BDC_TOTAL_EXPOSURE", 1.0),
         "source_top5": source_top5,
         "selected": selected["stock_id"].tolist(),
         "candidate_count": int((scores["stage2_pool_member"] == True).sum()),
