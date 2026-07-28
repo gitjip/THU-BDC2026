@@ -23,6 +23,7 @@ from model import StockTransformer
 from stage2_selection import normalize_selection_strategy, select_predictions
 from utils import (
 	apply_cross_sectional_rank_features,
+	apply_clean_risk_features,
 	apply_market_relative_features,
 	apply_trend_quality_features,
 	engineer_features_39,
@@ -207,6 +208,16 @@ def preprocess_predict_data(df, stockid2idx):
 			rank_mode,
 			rank_replace_set,
 			len(rank_feature_columns),
+			len(feature_columns),
+		)
+	if config.get('use_clean_risk_features', False):
+		processed, feature_columns, clean_risk_columns = apply_clean_risk_features(
+			processed,
+			feature_columns,
+		)
+		logger.info(
+			"预测集: 已添加清洗启发的风险特征 %s 个，输入特征=%s",
+			len(clean_risk_columns),
 			len(feature_columns),
 		)
 	if not config.get('use_instrument_feature', True):

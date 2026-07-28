@@ -14,6 +14,7 @@ from utils import create_ranking_dataset_vectorized
 from utils import apply_market_relative_features
 from utils import apply_trend_quality_features
 from utils import apply_cross_sectional_rank_features
+from utils import apply_clean_risk_features
 import joblib
 import os
 import json
@@ -157,6 +158,18 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
             rank_mode,
             rank_replace_set,
             len(rank_feature_columns),
+            len(feature_columns),
+        )
+
+    if config.get('use_clean_risk_features', False):
+        processed, feature_columns, clean_risk_columns = apply_clean_risk_features(
+            processed,
+            feature_columns,
+        )
+        logger.info(
+            "%s: 已添加清洗启发的风险特征 %s 个，输入特征=%s",
+            desc,
+            len(clean_risk_columns),
             len(feature_columns),
         )
 

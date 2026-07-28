@@ -88,6 +88,15 @@ TREND_QUALITY_FEATURE_COLUMNS = [
     'tq_up_ratio10',
 ]
 
+CLEAN_RISK_FEATURE_COLUMNS = [
+    'cr_no_trade',
+    'cr_no_trade_5',
+    'cr_no_trade_20',
+    'cr_amount_z20',
+    'cr_turnover_z20',
+    'cr_drawdown_20',
+]
+
 
 def cross_sectional_rank_feature_names(columns=None):
     source_columns = columns or CROSS_SECTIONAL_RANK_BASE_COLUMNS
@@ -268,6 +277,73 @@ def add_trend_quality_features(df):
 
 def apply_trend_quality_features(df, feature_columns):
     processed, added_columns = add_trend_quality_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
+
+
+def clean_risk_feature_names():
+    return list(CLEAN_RISK_FEATURE_COLUMNS)
+
+
+def add_clean_risk_features(df):
+    """Add liquidity/no-trade/drawdown features inspired by data cleaning."""
+    required_columns = {'股票代码', '日期', '开盘', '收盘', '最高', '最低', '成交量', '成交额', '换手率', '涨跌幅'}
+    missing = required_columns - set(df.columns)
+    if missing:
+        return df.copy(), []
+
+    result = df.copy()
+    result = result.sort_values(['股票代码', '日期']).reset_index(drop=True)
+    open_ = pd.to_numeric(result['开盘'], errors='coerce')
+    high = pd.to_numeric(result['最高'], errors='coerce')
+    low = pd.to_numeric(result['最低'], errors='coerce')
+    close = pd.to_numeric(result['收盘'], errors='coerce')
+    volume = pd.to_numeric(result['成交量'], errors='coerce')
+    amount = pd.to_numeric(result['成交额'], errors='coerce')
+    turnover = pd.to_numeric(result['换手率'], errors='coerce')
+    pct_chg = pd.to_numeric(result['涨跌幅'], errors='coerce')
+
+    flat_price_mask = open_.eq(close) & close.eq(high) & high.eq(low)
+    no_trade_mask = flat_price_mask & volume.le(0).fillna(False) & amount.le(0).fillna(False) & turnover.le(0).fillna(False)
+    no_trade_mask &= pct_chg.fillna(0.0).abs().le(1e-12)
+    result['cr_no_trade'] = no_trade_mask.astype(float)
+    groups = result.groupby('股票代码', sort=False)
+    result['cr_no_trade_5'] = groups['cr_no_trade'].transform(lambda values: values.rolling(5, min_periods=1).mean())
+    result['cr_no_trade_20'] = groups['cr_no_trade'].transform(lambda values: values.rolling(20, min_periods=5).mean())
+
+    result['_cr_log_amount'] = np.log1p(amount.clip(lower=0))
+    result['_cr_log_turnover'] = np.log1p(turnover.clip(lower=0))
+    groups = result.groupby('股票代码', sort=False)
+    log_amount_mean20 = groups['_cr_log_amount'].transform(lambda values: values.rolling(20, min_periods=5).mean())
+    log_amount_std20 = groups['_cr_log_amount'].transform(lambda values: values.rolling(20, min_periods=5).std())
+    log_turnover_mean20 = groups['_cr_log_turnover'].transform(lambda values: values.rolling(20, min_periods=5).mean())
+    log_turnover_std20 = groups['_cr_log_turnover'].transform(lambda values: values.rolling(20, min_periods=5).std())
+
+    result['cr_amount_z20'] = (result['_cr_log_amount'] - log_amount_mean20) / log_amount_std20.where(log_amount_std20.abs() > 1e-12)
+    result['cr_turnover_z20'] = (result['_cr_log_turnover'] - log_turnover_mean20) / log_turnover_std20.where(log_turnover_std20.abs() > 1e-12)
+
+    rolling_high20 = groups['收盘'].transform(
+        lambda values: pd.to_numeric(values, errors='coerce').rolling(20, min_periods=5).max()
+    )
+    result['cr_drawdown_20'] = close / rolling_high20.where(rolling_high20.abs() > 1e-12) - 1.0
+
+    for column in CLEAN_RISK_FEATURE_COLUMNS:
+        result[column] = (
+            pd.to_numeric(result[column], errors='coerce')
+            .replace([np.inf, -np.inf], np.nan)
+            .clip(lower=-10.0, upper=10.0)
+            .fillna(0.0)
+            .astype(float)
+        )
+
+    result.drop(columns=['_cr_log_amount', '_cr_log_turnover'], inplace=True)
+
+    return result, list(CLEAN_RISK_FEATURE_COLUMNS)
+
+
+def apply_clean_risk_features(df, feature_columns):
+    processed, added_columns = add_clean_risk_features(df)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns

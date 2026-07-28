@@ -177,6 +177,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `use_instrument_feature`：默认开启；可用 `BDC_USE_INSTRUMENT_FEATURE=0` 从模型输入中移除股票编号特征。
 - `use_market_relative_features`：默认关闭；可用 `BDC_USE_MARKET_RELATIVE_FEATURES=1` 追加市场相对特征。
 - `use_trend_quality_features`：默认关闭；可用 `BDC_USE_TREND_QUALITY_FEATURES=1` 追加趋势质量特征。
+- `use_clean_risk_features`：默认关闭；可用 `BDC_USE_CLEAN_RISK_FEATURES=1` 追加无成交、流动性和回撤风险特征。
 - `BDC_SUBMISSION_MODE`：默认 `rank-replace`；设为 `single` 可回退原始单模型入口，设为 `ensemble` 可运行两模型集成候选。
 - `BDC_ENSEMBLE_SELECTION_STRATEGY`：仅集成模式使用，默认 `ensemble_low_vol_top5`，即两个源模型 top5 并集后按低波动重排。
 - `selection_strategy`：仅单模型或源模型预测使用，默认 `model_top5`；可用 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5` 启用单模型低波动二阶段后处理。
@@ -202,6 +203,7 @@ BDC_USE_INSTRUMENT_FEATURE=0 BDC_USE_CROSS_SECTIONAL_RANKS=1 sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite sh train.sh debug
 BDC_LOSS_TARGET_TEMPERATURE=0.05 sh tune.sh v1.5.0 noid-rank-replace --windows 3 --skip-final
+sh tune.sh v1.6.0 noid-rank-cleanrisk --windows 3 --skip-final
 BDC_NUM_EPOCHS=30 BDC_LR_SCHEDULER=off BDC_EARLY_STOPPING_PATIENCE=0 sh tune.sh v1.2.10 noid --skip-final
 BDC_SUBMISSION_MODE=single sh train.sh
 BDC_SUBMISSION_MODE=single sh test.sh

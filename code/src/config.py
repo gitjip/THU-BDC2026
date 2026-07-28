@@ -28,6 +28,7 @@ sequence_length = _env_int('BDC_SEQUENCE_LENGTH', 30 if fast_dev_mode else 60)
 feature_num = os.environ.get('BDC_FEATURE_NUM', '39' if fast_dev_mode else '158+39')
 use_market_relative_features = _env_bool('BDC_USE_MARKET_RELATIVE_FEATURES', False)
 use_trend_quality_features = _env_bool('BDC_USE_TREND_QUALITY_FEATURES', False)
+use_clean_risk_features = _env_bool('BDC_USE_CLEAN_RISK_FEATURES', False)
 selection_strategy = os.environ.get('BDC_SELECTION_STRATEGY', 'model_top5').strip().lower()
 top_k = _env_int('BDC_TOP_K', 5)
 if not 1 <= top_k <= 5:
@@ -71,6 +72,8 @@ if use_market_relative_features:
     feature_dir_label = f'{feature_dir_label}_mktrel'
 if use_trend_quality_features:
     feature_dir_label = f'{feature_dir_label}_trendq'
+if use_clean_risk_features:
+    feature_dir_label = f'{feature_dir_label}_cleanrisk'
 output_dir_prefix = 'debug_' if fast_dev_mode else ''
 config = {
     'sequence_length': sequence_length,   # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
@@ -104,6 +107,7 @@ config = {
     'use_instrument_feature': _env_bool('BDC_USE_INSTRUMENT_FEATURE', True),
     'use_market_relative_features': use_market_relative_features,
     'use_trend_quality_features': use_trend_quality_features,
+    'use_clean_risk_features': use_clean_risk_features,
     'selection_strategy': selection_strategy,
     'top_k': top_k,
     'total_exposure': total_exposure,
