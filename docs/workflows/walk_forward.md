@@ -158,6 +158,25 @@ stage2_rerank_candidates.csv
 
 当前 `v1.2.13 noid` 与 `v1.3.2 noid-rank-replace` 的 12 窗口复盘中，`low_vol_then_rank_top5` 在“两模型 top5 并集”里暂时最有希望；综合风险分和前缀限额表现较差。从 `v1.3.8` 起，它已作为可选预测后处理接入，但默认不启用。
 
+如果要比较多个完整实验的总体表现，可以用验证汇总脚本：
+
+```bash
+.venv/bin/python code/src/validate_experiments.py experiments/v1.4.1 experiments/v1.4.2 experiments/v1.4.3 --ensemble-label v1.4.3
+```
+
+默认输出到：
+
+```text
+experiments/analysis/validation_v1.4.1_vs_v1.4.2_vs_v1.4.3/
+```
+
+重点看：
+
+- `summary.csv`：均值、中位数、标准差、最差窗口、正分窗口数、相对市场均值；
+- `paired_diffs.csv`：集成逐窗口相对源模型的差值和胜负；
+- `diagnostic_summary.csv`：Spearman、top5/top20/top50 后验收益、真实 top5 命中数、重复股票数量；
+- `readme.md`：自动生成的简短中文结论。
+
 如果只想复用已有模型、单独评估后处理策略，可以让新实验目录复用旧模型：
 
 ```bash
@@ -179,6 +198,16 @@ sh tune.sh v1.3.9 ensemble-lowvol --windows 12 --skip-final
 `v1.3.9 ensemble-lowvol` 已完成 12 窗口验证，均值约 `0.030457`，最差窗口约 `-0.032689`，高于 `v1.2.13 noid` 的均值 `0.024783` 和最差窗口 `-0.063489`。这说明“两模型 top5 并集 + 低波动重排”比单模型低波动后处理更有希望。
 
 注意：该 profile 只是复用已有源模型。如果不加 `--skip-final`，最终预测阶段需要 `v1.2.13` 和 `v1.3.2` 都存在 `final/model/best_model.pth` 与 `scaler.pkl`。当前本机这两个源实验只有窗口模型，没有最终模型，因此 `ensemble-lowvol` 暂时用于历史验证；正式提交前要先补齐源实验最终模型。
+
+`v1.4.1`、`v1.4.2`、`v1.4.3` 已补跑 18 窗口扩展验证：
+
+```bash
+sh tune.sh v1.4.1 noid --windows 18 --skip-final
+sh tune.sh v1.4.2 noid-rank-replace --windows 18 --skip-final
+BDC_ENSEMBLE_SOURCES=v1.4.1,v1.4.2 sh tune.sh v1.4.3 ensemble-lowvol --windows 18 --skip-final
+```
+
+18 窗口下 `ensemble-lowvol` 均值约 `0.017967`，高于 noid 的 `0.007921`，但低于 rank-replace 的 `0.020982`；最差窗口约 `-0.045579`，优于两个源模型。结论是：它仍可作为防守型候选，但还不能视为已证明的默认提交主线。
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 

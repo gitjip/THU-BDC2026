@@ -197,7 +197,49 @@ sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2
 
 当前判断：`v1.3.9` 基本复现了 `v1.3.7` 诊断中的最好规则，是目前二阶段方向最值得保留的候选。但它仍依赖两个源模型的候选多样性，并没有证明“低波动”本身在单模型 topN 内稳定有效。
 
-## 5. v1.3.4 rank-lite 诊断结论
+## 5. v1.4.1-v1.4.3 18 窗口扩展验证
+
+为检查 `ensemble-lowvol` 是否只适配最近 12 个窗口，补跑了 18 窗口严格对照：
+
+```bash
+sh tune.sh v1.4.1 noid --windows 18 --skip-final
+sh tune.sh v1.4.2 noid-rank-replace --windows 18 --skip-final
+BDC_ENSEMBLE_SOURCES=v1.4.1,v1.4.2 sh tune.sh v1.4.3 ensemble-lowvol --windows 18 --skip-final
+```
+
+统一汇总产物位于：
+
+```text
+experiments/analysis/validation_v1.4.1_vs_v1.4.2_vs_v1.4.3/
+```
+
+18 窗口结果：
+
+- `v1.4.1 noid`：均值约 `0.007921`，最差窗口约 `-0.063489`，正分窗口 `9/18`；
+- `v1.4.2 noid-rank-replace`：均值约 `0.020982`，最差窗口约 `-0.055007`，正分窗口 `10/18`；
+- `v1.4.3 ensemble-lowvol`：均值约 `0.017967`，最差窗口约 `-0.045579`，正分窗口 `10/18`。
+
+按早期新增 6 窗口和近期 12 窗口拆开看：
+
+- 早期 6 窗口均值：noid 约 `-0.025805`，rank-replace 约 `0.013438`，ensemble 约 `-0.007014`；
+- 近期 12 窗口均值：noid 约 `0.024783`，rank-replace 约 `0.024755`，ensemble 约 `0.030457`。
+
+当前判断：
+
+- `ensemble-lowvol` 仍改善了 noid，并且最差窗口最温和，说明低波动并集重排有一定防守价值；
+- 但 18 窗口均值低于 `rank-replace`，没有通过“均值高于两个源模型”的验收线；
+- 新增早期窗口拖累了 ensemble，说明 12 窗口结论偏乐观，不能只凭 `v1.3.9` 把它视为已证明默认主线；
+- 提交前应保留 `BDC_SUBMISSION_MODE=single` 回退复核，或者继续用更多窗口/其他指标证明集成优于单模型。
+
+候选池二阶段诊断也显示，18 窗口下 `low_vol_then_rank_top5` 不再是最强规则：
+
+- `low_vol_then_rank_top5` 均值约 `0.017967`，与实际 `v1.4.3` 一致；
+- `low_risk_then_rank_top5` 均值约 `0.018787`，略高于低波动，但仍低于最佳单模型 `v1.4.2`；
+- `union_avg_rank_top5` 均值约 `0.016651`，说明简单平均排名仍不足以稳定超过源模型。
+
+因此下一步不应急着扩大集成策略复杂度。更合理的方向是先改源模型信号质量，例如继续做更有假设约束的特征工程，再用 18 窗口以上验证集成是否真正吃到多样性。
+
+## 6. v1.3.4 rank-lite 诊断结论
 
 `v1.3.4 noid-rank-lite` 的 3 窗口结果显示，问题不是 top5 偶然选错，而是高分区整体排序变差：
 
@@ -208,7 +250,7 @@ sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2
 
 当前结论：`rank-lite` 没有缓解固定选股池，反而让候选池更窄，不建议扩跑 12 窗口。
 
-## 6. 后续判断方法
+## 7. 后续判断方法
 
 优先检查每个 walk-forward 窗口的：
 
@@ -228,7 +270,7 @@ windows/window_*/score.json
 
 下一步优先用完整排名判断是否存在“固定选股池”。确认后再决定是改特征、改损失，还是做多种子集成。
 
-## 7. 固定选股池的优先嫌疑
+## 8. 固定选股池的优先嫌疑
 
 当前 39 特征默认包含 `instrument`。它是股票代码映射后的整数索引，不是真正的行业、风格或基本面特征。模型把它当连续数值输入时，可能学到“某些编号长期更该被选”的身份偏好。
 
@@ -248,7 +290,7 @@ sh tune.sh v1.2.8 noid --skip-final
 
 `noid` 只是不把 `instrument` 输入模型。股票代码仍用于数据分组、序列构造、打分和输出，不会影响提交文件格式。
 
-## 8. v1.2.8 noid 后续
+## 9. v1.2.8 noid 后续
 
 `v1.2.8 noid` 的多窗口均值改善，说明移除 `instrument` 是值得继续观察的方向。但完整排名也显示，模型更容易选到高波动股票，第二个窗口表现明显拖累均值。
 
