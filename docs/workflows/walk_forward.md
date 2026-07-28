@@ -63,6 +63,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-rank-sharp` | rank替代+更尖锐listwise目标 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2, target_temp=0.05 | 30 |
 | `noid-rank-trendq` | rank替代+趋势质量 | 3 | 39(no instrument, rank replace)+5 trendq | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-cleanrisk` | rank替代+清洗启发风险特征 | 3 | 39(no instrument, rank replace)+6 cleanrisk | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-multiperiod` | rank替代+多周期基础特征 | 3 | 39(no instrument, rank replace)+10 multiperiod | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 30 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
 | `noid-lowvol` | 去编号+低波动后处理 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, low-vol selection | 30 |
@@ -72,7 +73,7 @@ sh tune.sh quick --skip-final --resume
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
 
 `noid` 源自 `balanced` 小模型配置，但当前属于主线对照档：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`，并使用 30 epoch 上限。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。如果要重新严格比较是否保留 `instrument`，应给 `balanced` 显式设置相同 epoch 上限。
 
@@ -91,6 +92,8 @@ sh tune.sh quick --skip-final --resume
 `noid-rank-trendq` 基于 `noid-rank-replace`，追加 5 个趋势质量特征：波动调整动量、20 日区间位置、20 日回撤和 10 日上涨占比。它用于测试“上涨质量”能否改善 rank-replace 的 top20/top50 排序，不改变模型结构。`v1.4.9` 最新 3 窗口短测均值约 `-0.067912`，相对同日期 `v1.4.5 noid-rank-replace` 平均低约 `0.048780`，不建议扩跑。
 
 `noid-rank-cleanrisk` 基于 `noid-rank-replace`，追加 6 个清洗启发的风险特征：当前无成交标记、5/20 日无成交比例、成交额/换手率 20 日 z-score 和 20 日回撤。它用于测试停牌、无成交、流动性突然枯竭和明显回撤是否能改善源模型排序信号。先跑最近 3 窗口，未通过就不要扩跑。
+
+`noid-rank-multiperiod` 基于 `noid-rank-replace`，追加 10 个多周期基础特征：3/20/40 日收益、5/40 日波动率、3/10/40 日均线偏离和 3/20、10/40 量能比例。它用于测试更完整的短中期窗口是否能改善源模型排序信号。
 
 `noid-stable` 是 `noid` 的正则化对照：继续移除 `instrument`，同时设置 `dropout=0.2`、`weight_decay=1e-4`。它用于检查 `noid` 倾向高波动股票的问题是否能通过更强正则化缓解。
 
@@ -145,6 +148,7 @@ sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 sh tune.sh v1.5.0 noid-rank-sharp --windows 3 --skip-final
 sh tune.sh v1.4.9 noid-rank-trendq --windows 3 --skip-final
 sh tune.sh v1.6.0 noid-rank-cleanrisk --windows 3 --skip-final
+sh tune.sh v1.6.1 noid-rank-multiperiod --windows 3 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final
 sh tune.sh v1.2.14 noid-full --windows 3 --skip-final
 sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2.13
@@ -247,7 +251,7 @@ BDC_ENSEMBLE_SOURCES=v1.4.7,v1.4.5 sh tune.sh v1.4.8 ensemble-lowvol --windows 2
 
 比较多个实验时，`validate_experiments.py` 会额外输出 `config_comparison.csv`，并在 `readme.md` 里提示关键训练预算是否不一致。若 `BDC_NUM_EPOCHS`、训练目标日、每日股票数、模型规模等不同，应先把结果当作参考，避免直接下结论。
 
-下一步不再推荐扩跑 `v1.6.0 noid-rank-cleanrisk`。它的 24 窗口结果已经明显差于 `rank-replace`，说明清洗启发的流动性/回撤风险特征不适合作为当前主线。若继续做特征改动，应重新回到更强的金融假设，而不是在 cleanrisk 上继续加宽。
+下一步不再推荐扩跑 `v1.6.0 noid-rank-cleanrisk`。它的 24 窗口结果已经明显差于 `rank-replace`，说明清洗启发的流动性/回撤风险特征不适合作为当前主线。现在回到 `rank-replace`，先跑 `v1.6.1 noid-rank-multiperiod` 的 3 窗口短测。
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 

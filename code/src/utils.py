@@ -97,6 +97,19 @@ CLEAN_RISK_FEATURE_COLUMNS = [
     'cr_drawdown_20',
 ]
 
+MULTI_PERIOD_FEATURE_COLUMNS = [
+    'mp_return_3',
+    'mp_return_20',
+    'mp_return_40',
+    'mp_volatility_5',
+    'mp_volatility_40',
+    'mp_ma_gap_3',
+    'mp_ma_gap_10',
+    'mp_ma_gap_40',
+    'mp_volume_ratio_3_20',
+    'mp_volume_ratio_10_40',
+]
+
 
 def cross_sectional_rank_feature_names(columns=None):
     source_columns = columns or CROSS_SECTIONAL_RANK_BASE_COLUMNS
@@ -344,6 +357,62 @@ def add_clean_risk_features(df):
 
 def apply_clean_risk_features(df, feature_columns):
     processed, added_columns = add_clean_risk_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
+
+
+def multi_period_feature_names():
+    return list(MULTI_PERIOD_FEATURE_COLUMNS)
+
+
+def add_multi_period_features(df):
+    """Add simple past-only multi-period return, volatility, MA-gap and volume features."""
+    required_columns = {'股票代码', '日期', '收盘', '成交量'}
+    missing = required_columns - set(df.columns)
+    if missing:
+        return df.copy(), []
+
+    result = df.copy()
+    result = result.sort_values(['股票代码', '日期']).reset_index(drop=True)
+    result['_mp_close'] = pd.to_numeric(result['收盘'], errors='coerce')
+    result['_mp_volume'] = pd.to_numeric(result['成交量'], errors='coerce')
+    groups = result.groupby('股票代码', sort=False)
+
+    result['mp_return_3'] = groups['_mp_close'].transform(lambda values: values.pct_change(3, fill_method=None))
+    result['mp_return_20'] = groups['_mp_close'].transform(lambda values: values.pct_change(20, fill_method=None))
+    result['mp_return_40'] = groups['_mp_close'].transform(lambda values: values.pct_change(40, fill_method=None))
+
+    result['_mp_return_1'] = groups['_mp_close'].transform(lambda values: values.pct_change(1, fill_method=None))
+    result['mp_volatility_5'] = groups['_mp_return_1'].transform(lambda values: values.rolling(5, min_periods=3).std())
+    result['mp_volatility_40'] = groups['_mp_return_1'].transform(lambda values: values.rolling(40, min_periods=20).std())
+
+    for window, min_periods in [(3, 2), (10, 5), (40, 20)]:
+        ma = groups['_mp_close'].transform(lambda values, w=window, m=min_periods: values.rolling(w, min_periods=m).mean())
+        result[f'mp_ma_gap_{window}'] = result['_mp_close'] / ma.where(ma.abs() > 1e-12) - 1.0
+
+    volume_ma_3 = groups['_mp_volume'].transform(lambda values: values.rolling(3, min_periods=2).mean())
+    volume_ma_10 = groups['_mp_volume'].transform(lambda values: values.rolling(10, min_periods=5).mean())
+    volume_ma_20 = groups['_mp_volume'].transform(lambda values: values.rolling(20, min_periods=10).mean())
+    volume_ma_40 = groups['_mp_volume'].transform(lambda values: values.rolling(40, min_periods=20).mean())
+    result['mp_volume_ratio_3_20'] = volume_ma_3 / volume_ma_20.where(volume_ma_20.abs() > 1e-12) - 1.0
+    result['mp_volume_ratio_10_40'] = volume_ma_10 / volume_ma_40.where(volume_ma_40.abs() > 1e-12) - 1.0
+
+    for column in MULTI_PERIOD_FEATURE_COLUMNS:
+        result[column] = (
+            pd.to_numeric(result[column], errors='coerce')
+            .replace([np.inf, -np.inf], np.nan)
+            .clip(lower=-10.0, upper=10.0)
+            .fillna(0.0)
+            .astype(float)
+        )
+
+    result.drop(columns=['_mp_close', '_mp_volume', '_mp_return_1'], inplace=True)
+    return result, list(MULTI_PERIOD_FEATURE_COLUMNS)
+
+
+def apply_multi_period_features(df, feature_columns):
+    processed, added_columns = add_multi_period_features(df)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns

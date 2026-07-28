@@ -25,6 +25,7 @@ from utils import (
 	apply_cross_sectional_rank_features,
 	apply_clean_risk_features,
 	apply_market_relative_features,
+	apply_multi_period_features,
 	apply_trend_quality_features,
 	engineer_features_39,
 	engineer_features_158plus39,
@@ -208,6 +209,16 @@ def preprocess_predict_data(df, stockid2idx):
 			rank_mode,
 			rank_replace_set,
 			len(rank_feature_columns),
+			len(feature_columns),
+		)
+	if config.get('use_multi_period_features', False):
+		processed, feature_columns, multi_period_columns = apply_multi_period_features(
+			processed,
+			feature_columns,
+		)
+		logger.info(
+			"预测集: 已添加多周期基础特征 %s 个，输入特征=%s",
+			len(multi_period_columns),
 			len(feature_columns),
 		)
 	if config.get('use_clean_risk_features', False):
