@@ -22,7 +22,7 @@
 - `v1.4.9` 起正式 `train.sh/test.sh` 默认改为 `rank-replace` 单模型；两模型集成保留为 `ensemble` 可选模式。
 - `v1.5.0` `noid-rank-sharp` 3 窗口短测后结论是否定的：不改特征和模型，只降低真实收益 softmax 温度，结果反而略差于同日期 `rank-replace`，说明当前 listwise 监督信号不是主要瓶颈。
 - `v1.6.0` `noid-rank-cleanrisk` 24 窗口明显变差：虽然引入了清洗启发的流动性/回撤风险特征，但均值低于 `v1.4.5 rank-replace`，不应继续扩跑。
-- `v1.6.1` 回到 `rank-replace` 主线，准备测试多周期基础特征：只追加过去窗口收益、波动、均线偏离和量能比例，先跑 3 窗口，过线后再扩 12/24 窗口。
+- `v1.6.1` `noid-rank-multiperiod` 24 窗口明显变差：追加 3/5/10/20/40 日多周期基础特征后均值为负，排序诊断也变差，不应继续扩跑或升默认。
 
 ## 版本记录
 
@@ -60,6 +60,7 @@
 | `v1.4.9` | 默认提交入口切到 rank-replace，新增 trend-quality 短测 | 3 | `-0.067912` | `train.sh/test.sh` 默认使用 `model/rank_replace`；`noid-rank-trendq` 最新 3 窗口全负，均值低于同日期 `v1.4.5` 约 `0.048780`，不扩跑。 |
 | `v1.5.0` | `noid-rank-sharp` 3 窗口短测 | 3 | `-0.024860` | 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`；同日期对照下 0/3 胜出，均值略差，先止损。 |
 | `v1.6.0` | `noid-rank-cleanrisk` 24 窗口 | 24 | `0.000872` | 在 `noid-rank-replace` 上追加清洗启发的流动性/回撤风险特征后明显变差；`24/24` 里只有 `12` 个窗口比 `rank-replace` 更好，不值得扩跑。 |
+| `v1.6.1` | `noid-rank-multiperiod` 24 窗口 | 24 | `-0.012037` | 在 `noid-rank-replace` 上追加 10 个多周期基础特征后明显变差；相对 `v1.4.5 rank-replace` 仅 `5/24` 胜出，平均差值约 `-0.029594`，不值得保留。 |
 
 ## 后续记录规范
 
