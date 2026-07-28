@@ -221,7 +221,7 @@ BDC_ENSEMBLE_SOURCES=v1.4.4,v1.4.5 sh tune.sh v1.4.6 ensemble-lowvol --windows 2
 
 可比性复核：`v1.4.4 noid` 使用旧 profile，epoch 上限为 15；`v1.4.5 noid-rank-replace` 为 30，其中有窗口最佳 epoch 到 16。因此 `v1.4.4` 与 `v1.4.5` 不能视为完全严格对照。从 `v1.4.7` 起，`noid`、`noid-stable`、`noid-lowvol` 统一改为 30 epoch 上限，正式集成源模型里的 noid 也同步改为 30。
 
-下一轮优先补这个公平对照：
+已补这个公平对照：
 
 ```bash
 sh tune.sh v1.4.7 noid --windows 24 --skip-final
@@ -229,7 +229,11 @@ BDC_ENSEMBLE_SOURCES=v1.4.7,v1.4.5 sh tune.sh v1.4.8 ensemble-lowvol --windows 2
 .venv/bin/python code/src/validate_experiments.py experiments/v1.4.7 experiments/v1.4.5 experiments/v1.4.8 --ensemble-label v1.4.8
 ```
 
+结果显示 `v1.4.7 noid` 与旧 `v1.4.4` 逐窗口完全一致，`v1.4.8 ensemble-lowvol` 与旧 `v1.4.6` 也完全一致。24 窗口公平预算下，`rank-replace` 均值约 `0.017557`，高于 noid 的 `0.002716` 和 ensemble 的 `0.014062`。当前应把 `rank-replace` 作为最强单模型候选，`ensemble-lowvol` 只作为防守候选。
+
 比较多个实验时，`validate_experiments.py` 会额外输出 `config_comparison.csv`，并在 `readme.md` 里提示关键训练预算是否不一致。若 `BDC_NUM_EPOCHS`、训练目标日、每日股票数、模型规模等不同，应先把结果当作参考，避免直接下结论。
+
+下一步推荐先做小步特征改动，并和 `v1.4.5 noid-rank-replace` 做 24 窗口对照。不要再优先调低波动重排，因为两模型 top5 并集有多样性，但当前重排规则没超过 rank-replace。
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 

@@ -223,7 +223,9 @@ sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 
 `balanced`、`smooth` 和 `stable` 的 epoch 上限保持 15、早停耐心值设为 5，继续作为含 `instrument` 的轻量对照。`noid` 主线和它的特征/后处理对照统一使用 30 epoch 上限，包括 `noid`、`noid-rank`、`noid-rank-replace`、`noid-marketrel`、`noid-stable`、`noid-lowvol` 和 `noid-full`。这样后续比较 noid、rank、marketrel、lowvol 时，主要差异来自实验变量本身，而不是最大训练轮数。
 
-可比性复核：`v1.4.4 noid` 使用旧 15 epoch 上限，`v1.4.5 noid-rank-replace` 使用 30 epoch 上限；`v1.4.5` 中有窗口最佳 epoch 到 16，说明较大上限确实可能影响结论。因此 24 窗口里 `rank-replace` 暂时最好，但它相对旧 noid 的优势还需要用新的 30 epoch noid 重跑确认。从 `v1.4.7` 起已修正 profile 和正式集成源模型配置。
+可比性复核：`v1.4.4 noid` 使用旧 15 epoch 上限，`v1.4.5 noid-rank-replace` 使用 30 epoch 上限；`v1.4.5` 中有窗口最佳 epoch 到 16，说明较大上限可能影响结论。从 `v1.4.7` 起已修正 profile 和正式集成源模型配置。
+
+`v1.4.7 noid` 补跑后与旧 `v1.4.4` 逐窗口完全一致，说明 noid 弱不是 15 epoch 截断造成的。公平预算下，`v1.4.5 rank-replace` 仍高于 noid；但 `v1.4.8 ensemble-lowvol` 仍低于 rank-replace。因此训练过程层面的下一步不是继续加 epoch，而是回到特征和排序信号质量。
 
 ## 12. 平台期和震荡判断
 
