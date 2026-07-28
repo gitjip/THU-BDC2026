@@ -13,6 +13,8 @@
 
 因此当前优先改训练过程，而不是盲目加大模型。
 
+补充一点数据清洗经验：原始 `stock_data` 里确实存在少量“开高低收完全相同、但成交量/成交额/换手率/涨跌幅缺失”的平盘样本。这类样本现在在数据入口会补零保留，不会被整行删掉；如果以后又出现别的缺失行，才在读取阶段按异常行处理。这样更适合后续继续做 walk-forward 对照。
+
 ## 2. v1.2.1 large 观察
 
 `experiments/v1.2.1` 使用 `large` 档位：3 个 walk-forward 窗口、39 特征、45 日序列、`d_model=96`、3 层 Transformer、`dim_feedforward=512`、20 个 epoch 上限、学习率 `5e-6`、`BDC_TORCH_NUM_THREADS=14`。

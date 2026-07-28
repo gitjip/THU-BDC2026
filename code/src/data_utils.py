@@ -21,6 +21,15 @@ REQUIRED_COLUMNS = {
     "涨跌幅",
 }
 
+NO_TRADE_FILL_COLUMNS = [
+    "成交量",
+    "成交额",
+    "振幅",
+    "涨跌额",
+    "换手率",
+    "涨跌幅",
+]
+
 
 def setup_logging(name: str, log_file: str | Path | None = None) -> logging.Logger:
     def build_handlers() -> list[logging.Handler]:
@@ -74,6 +83,44 @@ def normalize_stock_codes(series: pd.Series) -> pd.Series:
     numeric_mask = codes.str.fullmatch(r"\d{1,6}", na=False)
     codes.loc[numeric_mask] = codes.loc[numeric_mask].str.zfill(6)
     return codes.astype(str)
+
+
+def clean_market_data(df: pd.DataFrame) -> pd.DataFrame:
+    """补全停牌/无成交样本并删除仍然缺失必要字段的异常行。"""
+    result = df.copy()
+    summary = {
+        "rows_before_clean": int(len(result)),
+        "flat_rows": 0,
+        "flat_rows_filled": 0,
+        "filled_cells": 0,
+        "dropped_rows": 0,
+        "rows_after_clean": 0,
+    }
+
+    price_columns = ["开盘", "收盘", "最高", "最低"]
+    numeric_columns = [column for column in REQUIRED_COLUMNS if column not in {"股票代码", "日期"}]
+
+    flat_price_mask = result[price_columns].notna().all(axis=1)
+    flat_price_mask &= result["开盘"].eq(result["收盘"])
+    flat_price_mask &= result["收盘"].eq(result["最高"])
+    flat_price_mask &= result["最高"].eq(result["最低"])
+    summary["flat_rows"] = int(flat_price_mask.sum())
+
+    fill_mask = flat_price_mask & result[NO_TRADE_FILL_COLUMNS].isna().any(axis=1)
+    if fill_mask.any():
+        summary["flat_rows_filled"] = int(fill_mask.sum())
+        summary["filled_cells"] = int(result.loc[fill_mask, NO_TRADE_FILL_COLUMNS].isna().sum().sum())
+        result.loc[fill_mask, NO_TRADE_FILL_COLUMNS] = result.loc[fill_mask, NO_TRADE_FILL_COLUMNS].fillna(0.0)
+
+    remaining_missing_mask = result[numeric_columns].isna().any(axis=1)
+    if remaining_missing_mask.any():
+        summary["dropped_rows"] = int(remaining_missing_mask.sum())
+        result = result.loc[~remaining_missing_mask].copy()
+
+    result = result.sort_values(["股票代码", "日期"]).reset_index(drop=True)
+    summary["rows_after_clean"] = int(len(result))
+    result.attrs["cleaning_summary"] = summary
+    return result
 
 
 def resolve_stock_data_file(
@@ -142,7 +189,7 @@ def read_market_data(path: str | Path) -> pd.DataFrame:
         df[column] = pd.to_numeric(df[column], errors="coerce")
 
     df = df.drop_duplicates(subset=["股票代码", "日期"], keep="last")
-    df = df.sort_values(["股票代码", "日期"]).reset_index(drop=True)
+    df = clean_market_data(df)
     return df
 
 
@@ -161,6 +208,7 @@ def load_stock_data(
 
     if logger:
         dates = sorted(df["日期"].unique())
+        summary = df.attrs.get("cleaning_summary", {})
         logger.info(
             "读取数据: %s | 行数=%s | 股票数=%s | 交易日=%s | 范围=%s ~ %s",
             path,
@@ -170,6 +218,14 @@ def load_stock_data(
             pd.Timestamp(dates[0]).date(),
             pd.Timestamp(dates[-1]).date(),
         )
+        if summary:
+            logger.info(
+                "数据清洗: 平盘补零=%s 行 / %s 个缺失单元, 删除异常=%s 行, 清洗后=%s 行",
+                summary.get("flat_rows_filled", 0),
+                summary.get("filled_cells", 0),
+                summary.get("dropped_rows", 0),
+                summary.get("rows_after_clean", len(df)),
+            )
     return df, path
 
 

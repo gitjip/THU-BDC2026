@@ -151,7 +151,7 @@ def parse_args() -> argparse.Namespace:
         "version",
         nargs="?",
         default=read_default_version(),
-        help="实验语义版本号，例如 v1.0.0；默认读取 VERSION",
+        help="实验语义版本号，例如 v1.3.10；默认读取 VERSION",
     )
     parser.add_argument("--windows", type=int, default=default_windows, help="walk-forward 窗口数量")
     parser.add_argument("--target-days", type=int, default=parse_int_env("BDC_WF_TARGET_DAYS", 5), help="每个窗口验证的连续交易日数量")
@@ -169,7 +169,7 @@ def parse_args() -> argparse.Namespace:
 
 def validate_args(args: argparse.Namespace) -> None:
     if not SEMVER_PATTERN.fullmatch(args.version):
-        raise ValueError(f"版本号必须是 vMAJOR.MINOR.PATCH 格式，例如 v1.0.0。当前: {args.version}")
+        raise ValueError(f"版本号必须是 vMAJOR.MINOR.PATCH 格式（各段可为多位数字），例如 v1.3.10。当前: {args.version}")
     if args.windows <= 0:
         raise ValueError("--windows 必须大于 0")
     if args.target_days != 5:
