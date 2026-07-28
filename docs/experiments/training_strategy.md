@@ -78,9 +78,9 @@ Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top
 
 当前结论：调度和早停应继续默认保留。它们不是稳定提高每个窗口的“冲分技巧”，但在当前实验中显著节省时间，且多窗口均值没有变差。下一步比继续硬跑 30 epoch 更值得做的是 `noid-full`：保持 `noid` 模型不变，只取消训练目标日和每日股票抽样，验证更多训练数据是否能提高泛化。
 
-## 8. v1.2.15 balanced 严格对照
+## 8. v1.2.15 balanced 对照
 
-`v1.2.15 balanced` 与 `v1.2.13 noid` 使用同样 12 个窗口，差异主要是是否把 `instrument` 输入模型。结果显示：
+`v1.2.15 balanced` 与 `v1.2.13 noid` 使用同样 12 个窗口，差异主要是是否把 `instrument` 输入模型。两者 epoch 上限不同，但最佳 epoch 都没有超过 15，因此仍能作为强参考，不应称为完全严格对照。结果显示：
 
 - `v1.2.13 noid` 12 窗口均值约 `0.024783`，正分窗口 `8/12`；
 - `v1.2.15 balanced` 12 窗口均值约 `-0.002820`，正分窗口 `6/12`；
@@ -187,7 +187,7 @@ sh tune.sh v1.2.7 smooth --skip-final
 sh tune.sh v1.2.8 noid --skip-final
 ```
 
-`noid` 与 `balanced` 保持相同模型和训练预算，只从模型输入特征中移除 `instrument`。股票代码仍用于分组和输出。
+`noid` 与 `balanced` 保持相同小模型结构，只从模型输入特征中移除 `instrument`。当前 noid 主线使用 30 epoch 上限；如果要和 `balanced` 严格比较，需要给 `balanced` 显式设置同样的 epoch 上限。股票代码仍用于分组和输出。
 
 如果要测试去编号后是否需要更强正则化，用 `noid-stable` 档位：
 
@@ -221,7 +221,9 @@ sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 
 `noid-rank-replace` 仍基于 `noid`，但设置 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`。它不把所有 rank 列简单追加到输入后面，而是用 `_cs_rank` 列替换部分原始绝对量价列，用于降低重复信号和非平稳尺度噪声。
 
-`balanced`、`noid`、`smooth` 和 `stable` 的 epoch 上限设为 15、早停耐心值设为 5。这个上限比最初的 5 轮更接近 `large`，能避免分数平滑增长时被硬截断；同时模型仍比 `large` 小，单个 epoch 更快。如果日志显示大多数窗口长期在第 3 到第 5 轮早停，说明上限不是瓶颈；如果最佳 epoch 多次出现在第 12 轮以后，再考虑把上限提高到 20。`noid-full` 为完整数据实验，epoch 上限单独设为 30，但仍保留早停。
+`balanced`、`smooth` 和 `stable` 的 epoch 上限保持 15、早停耐心值设为 5，继续作为含 `instrument` 的轻量对照。`noid` 主线和它的特征/后处理对照统一使用 30 epoch 上限，包括 `noid`、`noid-rank`、`noid-rank-replace`、`noid-marketrel`、`noid-stable`、`noid-lowvol` 和 `noid-full`。这样后续比较 noid、rank、marketrel、lowvol 时，主要差异来自实验变量本身，而不是最大训练轮数。
+
+可比性复核：`v1.4.4 noid` 使用旧 15 epoch 上限，`v1.4.5 noid-rank-replace` 使用 30 epoch 上限；`v1.4.5` 中有窗口最佳 epoch 到 16，说明较大上限确实可能影响结论。因此 24 窗口里 `rank-replace` 暂时最好，但它相对旧 noid 的优势还需要用新的 30 epoch noid 重跑确认。从 `v1.4.7` 起已修正 profile 和正式集成源模型配置。
 
 ## 12. 平台期和震荡判断
 

@@ -55,23 +55,23 @@ sh tune.sh quick --skip-final --resume
 | --- | --- | ---: | --- | ---: | ---: | ---: | --- | ---: |
 | `quick` | 平时调试 | 1 | 39 | 30 | 24 | 60 | d_model=64, layers=1 | 4 |
 | `balanced` | 常规调参 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
-| `noid` | 去股票编号对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2 | 15 |
+| `noid` | 去股票编号对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-marketrel` | 去编号+市场相对特征 | 3 | 39(no instrument)+8 mktrel | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank` | 去编号+横截面rank | 3 | 39(no instrument)+rank | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-lite` | 去编号+小范围rank替代 | 3 | 39(no instrument, 7 rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-replace` | 去编号+rank替代绝对量价 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
-| `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
+| `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 30 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
-| `noid-lowvol` | 去编号+低波动后处理 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, low-vol selection | 15 |
+| `noid-lowvol` | 去编号+低波动后处理 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, low-vol selection | 30 |
 | `ensemble-lowvol` | 两模型 top5 并集+低波动重排 | 3 | 复用源模型 | 复用源模型 | 不训练 | 不训练 | noid + rank-replace | 不训练 |
 | `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
 | `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题，`balanced` 开始承担后续公平对照和常规训练角色，所以默认也使用 3 个窗口。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
 
-`noid` 是 `balanced` 的特征对照：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。
+`noid` 源自 `balanced` 小模型配置，但当前属于主线对照档：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`，并使用 30 epoch 上限。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。如果要重新严格比较是否保留 `instrument`，应给 `balanced` 显式设置相同 epoch 上限。
 
 `noid-marketrel` 是 `noid` 的市场相对特征对照：默认 `BDC_USE_MARKET_RELATIVE_FEATURES=1`，追加 8 个 `mkt_rel_*` 特征，用于判断个股是否强于同日市场整体。它不启用 rank，也不改模型结构。
 
@@ -95,7 +95,7 @@ sh tune.sh quick --skip-final --resume
 
 ## 5. 下一轮推荐对照
 
-`v1.2.15 balanced` 与 `v1.2.13 noid` 的 12 窗口严格对照显示，移除 `instrument` 后均值和多数窗口表现更好。`v1.3.0 noid-rank` 最近 3 窗口均值明显变差，因此不要直接扩到 12 窗口。
+`v1.2.15 balanced` 与 `v1.2.13 noid` 的 12 窗口对照显示，移除 `instrument` 后均值和多数窗口表现更好。两者 epoch 上限不同，但最佳 epoch 都没有超过 15，因此结论仍有参考价值；若后续重新研究 `instrument`，应使用当前统一预算重跑。`v1.3.0 noid-rank` 最近 3 窗口均值明显变差，因此不要直接扩到 12 窗口。
 
 `v1.3.2 noid-rank-replace` 已跑完 12 窗口，和 noid 基本打平。当前主基线仍是 `v1.2.13 noid`；已有结果不用重跑，如果只是复核，使用新的版本号运行 `noid`，不要复用已存在的 `v1.2.13` 目录。
 
@@ -218,6 +218,18 @@ BDC_ENSEMBLE_SOURCES=v1.4.4,v1.4.5 sh tune.sh v1.4.6 ensemble-lowvol --windows 2
 ```
 
 24 窗口下 `rank-replace` 均值约 `0.017557`，`ensemble-lowvol` 约 `0.014062`，`noid` 约 `0.002716`。最新 2 个窗口三者都为负，说明近期验证段更难；当前不建议因为 12 窗口结果就把 `ensemble-lowvol` 当成已证明默认提交主线。
+
+可比性复核：`v1.4.4 noid` 使用旧 profile，epoch 上限为 15；`v1.4.5 noid-rank-replace` 为 30，其中有窗口最佳 epoch 到 16。因此 `v1.4.4` 与 `v1.4.5` 不能视为完全严格对照。从 `v1.4.7` 起，`noid`、`noid-stable`、`noid-lowvol` 统一改为 30 epoch 上限，正式集成源模型里的 noid 也同步改为 30。
+
+下一轮优先补这个公平对照：
+
+```bash
+sh tune.sh v1.4.7 noid --windows 24 --skip-final
+BDC_ENSEMBLE_SOURCES=v1.4.7,v1.4.5 sh tune.sh v1.4.8 ensemble-lowvol --windows 24 --skip-final
+.venv/bin/python code/src/validate_experiments.py experiments/v1.4.7 experiments/v1.4.5 experiments/v1.4.8 --ensemble-label v1.4.8
+```
+
+比较多个实验时，`validate_experiments.py` 会额外输出 `config_comparison.csv`，并在 `readme.md` 里提示关键训练预算是否不一致。若 `BDC_NUM_EPOCHS`、训练目标日、每日股票数、模型规模等不同，应先把结果当作参考，避免直接下结论。
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 

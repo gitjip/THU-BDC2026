@@ -74,7 +74,7 @@ def build_source_env(label: str, output_dir: str, base_env: dict[str, str], extr
 def get_submission_ensemble_sources(debug: bool = False) -> list[EnsembleSource]:
     base_env = DEBUG_BASE_ENV if debug else OFFICIAL_BASE_ENV
     model_root = "./model/ensemble_debug" if debug else "./model/ensemble"
-    noid_epochs = "4" if debug else "15"
+    noid_epochs = "4" if debug else "30"
     rank_epochs = "4" if debug else "30"
 
     return [

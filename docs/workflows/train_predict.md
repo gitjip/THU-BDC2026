@@ -168,7 +168,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `val_days`：训练过程内部验证集目标交易日数量，默认 5。
 - `train_target_days`：训练目标交易日数量限制，默认 0 表示不限制；debug 默认 24。
 - `max_stocks_per_day`：每个交易日抽样股票数，默认 0 表示不抽样；debug 默认 60。
-- `num_epochs`：最大训练轮数；正式集成中 `noid` 默认 15，`noid_rank_replace` 默认 30，早停可能提前结束。
+- `num_epochs`：最大训练轮数；正式集成中 `noid` 和 `noid_rank_replace` 默认都为 30，早停可能提前结束。
 - `learning_rate`：正式集成源模型默认 `3e-5`，debug `3e-5`。
 - `lr_scheduler`：默认 `plateau`，验证 `final_score` 停滞时降低学习率。
 - `early_stopping_patience`：默认完整训练 3，debug 2；设为 0 可关闭早停。

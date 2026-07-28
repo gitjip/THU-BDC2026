@@ -7,6 +7,42 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+TRAINING_BUDGET_KEYS = {
+    "BDC_FEATURE_NUM",
+    "BDC_SEQUENCE_LENGTH",
+    "BDC_TRAIN_TARGET_DAYS",
+    "BDC_VAL_DAYS",
+    "BDC_MAX_STOCKS_PER_DAY",
+    "BDC_D_MODEL",
+    "BDC_NHEAD",
+    "BDC_NUM_LAYERS",
+    "BDC_DIM_FEEDFORWARD",
+    "BDC_BATCH_SIZE",
+    "BDC_NUM_EPOCHS",
+    "BDC_LEARNING_RATE",
+    "BDC_WEIGHT_DECAY",
+    "BDC_DROPOUT",
+    "BDC_OPTIMIZER",
+    "BDC_LR_SCHEDULER",
+    "BDC_EARLY_STOPPING_PATIENCE",
+    "BDC_EARLY_STOPPING_MIN_DELTA",
+}
+
+FEATURE_OR_STRATEGY_KEYS = {
+    "BDC_TUNE_PROFILE",
+    "BDC_USE_INSTRUMENT_FEATURE",
+    "BDC_USE_MARKET_RELATIVE_FEATURES",
+    "BDC_USE_CROSS_SECTIONAL_RANKS",
+    "BDC_CROSS_SECTIONAL_RANK_MODE",
+    "BDC_CROSS_SECTIONAL_RANK_REPLACE_SET",
+    "BDC_SELECTION_STRATEGY",
+    "BDC_STAGE2_POOL_SIZE",
+    "BDC_STAGE2_VOL_WINDOW",
+    "BDC_ENSEMBLE_SOURCES",
+}
+
+COMPARABILITY_KEYS = sorted(TRAINING_BUDGET_KEYS | FEATURE_OR_STRATEGY_KEYS)
+
 
 def resolve_path(value: str | Path) -> Path:
     path = Path(value)
@@ -73,6 +109,38 @@ def read_repeated_summary(experiment_dir: Path) -> dict:
         "repeated_top20_stock_count": aggregate.get("repeated_top20_stock_count"),
         "selected_stock_count": int((repeated.get("selected_count", pd.Series(dtype=int)) > 0).sum()) if not repeated.empty else None,
     }
+
+
+def read_tune_env(experiment_dir: Path) -> dict:
+    manifest = read_json(experiment_dir / "manifest.json")
+    tune_env = manifest.get("tune_env", {})
+    return tune_env if isinstance(tune_env, dict) else {}
+
+
+def build_config_comparison(experiment_dirs: list[Path]) -> pd.DataFrame:
+    labels = [experiment_label(path) for path in experiment_dirs]
+    envs = {label: read_tune_env(path) for label, path in zip(labels, experiment_dirs)}
+    rows = []
+    for key in COMPARABILITY_KEYS:
+        values = [str(envs[label].get(key, "")) for label in labels]
+        if all(value == "" for value in values):
+            continue
+        if key in TRAINING_BUDGET_KEYS:
+            compared_values = [value for value in values if value != ""]
+        else:
+            compared_values = values
+        distinct_values = set(compared_values)
+        rows.append(
+            {
+                "key": key,
+                "category": "training_budget" if key in TRAINING_BUDGET_KEYS else "feature_or_strategy",
+                "differs": len(distinct_values) > 1,
+                "distinct_count": len(distinct_values),
+                "missing_count": sum(value == "" for value in values),
+                **{label: value for label, value in zip(labels, values)},
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def build_summary_rows(experiment_dirs: list[Path]) -> pd.DataFrame:
@@ -175,7 +243,20 @@ def judge(summary: pd.DataFrame, paired: pd.DataFrame, ensemble_label: str) -> l
     return lines
 
 
-def write_readme(output_dir: Path, experiment_dirs: list[Path], ensemble_label: str, summary: pd.DataFrame, paired: pd.DataFrame) -> None:
+def format_config_diff(row: pd.Series, labels: list[str]) -> str:
+    values = "，".join(f"`{label}`=`{row[label] or '未设置'}`" for label in labels)
+    return f"- `{row['key']}`：{values}"
+
+
+def write_readme(
+    output_dir: Path,
+    experiment_dirs: list[Path],
+    ensemble_label: str,
+    summary: pd.DataFrame,
+    paired: pd.DataFrame,
+    config_comparison: pd.DataFrame,
+) -> None:
+    labels = [experiment_label(path) for path in experiment_dirs]
     lines = [
         "# 验证汇总",
         "",
@@ -194,6 +275,33 @@ def write_readme(output_dir: Path, experiment_dirs: list[Path], ensemble_label: 
             "- `summary.csv`：总体分数指标。",
             "- `paired_diffs.csv`：集成相对源模型的逐窗口差值。",
             "- `diagnostic_summary.csv`：排序诊断聚合指标。",
+            "- `config_comparison.csv`：关键配置差异，用于判断是否是严格公平对照。",
+            "",
+            "## 可比性提示",
+            "",
+        ]
+    )
+    if config_comparison.empty:
+        lines.append("- 未从 `manifest.json` 读取到可比较的配置。")
+    else:
+        budget_diffs = config_comparison[
+            config_comparison["differs"] & config_comparison["category"].eq("training_budget")
+        ]
+        strategy_diffs = config_comparison[
+            config_comparison["differs"] & config_comparison["category"].eq("feature_or_strategy")
+        ]
+        if budget_diffs.empty:
+            lines.append("- 关键训练预算一致；若窗口日期也一致，可以作为较严格对照。")
+        else:
+            lines.append("- 关键训练预算存在差异，分数不能视为严格公平对照。优先复核：")
+            for _, row in budget_diffs.head(8).iterrows():
+                lines.append(format_config_diff(row, labels))
+        if not strategy_diffs.empty:
+            lines.append("- 特征或预测策略存在差异，这是实验变量或集成变量，应结合实验目的判断：")
+            for _, row in strategy_diffs.head(8).iterrows():
+                lines.append(format_config_diff(row, labels))
+    lines.extend(
+        [
             "",
             "## 结论",
             "",
@@ -233,10 +341,12 @@ def main() -> None:
     summary = build_summary_rows(experiment_dirs)
     paired = build_paired_diffs(experiment_dirs, ensemble_label=ensemble_label)
     diagnostic = build_diagnostic_summary(experiment_dirs)
+    config_comparison = build_config_comparison(experiment_dirs)
     summary.to_csv(output_dir / "summary.csv", index=False)
     paired.to_csv(output_dir / "paired_diffs.csv", index=False)
     diagnostic.to_csv(output_dir / "diagnostic_summary.csv", index=False)
-    write_readme(output_dir, experiment_dirs, ensemble_label, summary, paired)
+    config_comparison.to_csv(output_dir / "config_comparison.csv", index=False)
+    write_readme(output_dir, experiment_dirs, ensemble_label, summary, paired, config_comparison)
 
     print(f"validation summary written to: {output_dir.relative_to(REPO_ROOT)}")
 

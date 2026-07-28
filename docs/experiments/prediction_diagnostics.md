@@ -260,6 +260,17 @@ experiments/analysis/validation_v1.4.1_vs_v1.4.2_vs_v1.4.3/
 - `ensemble-lowvol` 最近 6 窗口均值最好，但最新两窗口没有守住 rank-replace，说明它更像防守候选，不是已证明默认主线；
 - 若时间有限，下一步优先改源模型特征，而不是继续加复杂集成。
 
+可比性复核后要补充一个限制：`v1.4.4 noid` 使用旧 15 epoch 上限，`v1.4.5 noid-rank-replace` 使用 30 epoch 上限。`v1.4.4` 的所有窗口最佳 epoch 都在 15 以内，但有窗口跑到第 15 轮才结束；`v1.4.5` 有 1 个窗口最佳 epoch 到 16，且有 3 个窗口训练超过 15 轮。因此 `v1.4.5` 相对 `v1.4.4` 的优势不能当作严格公平证明。
+
+从 `v1.4.7` 起，`noid` 主线和正式集成源模型里的 noid 都改为 30 epoch 上限。下一步应先补跑：
+
+```bash
+sh tune.sh v1.4.7 noid --windows 24 --skip-final
+BDC_ENSEMBLE_SOURCES=v1.4.7,v1.4.5 sh tune.sh v1.4.8 ensemble-lowvol --windows 24 --skip-final
+```
+
+补跑后再用 `validate_experiments.py` 汇总。新汇总会生成 `config_comparison.csv`，如果训练预算仍不同，自动在 `readme.md` 里提示。
+
 ## 6. v1.3.4 rank-lite 诊断结论
 
 `v1.3.4 noid-rank-lite` 的 3 窗口结果显示，问题不是 top5 偶然选错，而是高分区整体排序变差：
