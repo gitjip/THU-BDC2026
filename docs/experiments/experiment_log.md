@@ -21,6 +21,7 @@
 - `v1.4.7/8` 复核后确认：noid 提高到 30 epoch 后与旧 noid 24 窗口结果完全一致，`rank-replace` 相对 noid 的优势不是由 epoch 上限造成的；但 `ensemble-lowvol` 仍低于 `rank-replace`。
 - `v1.4.9` 起正式 `train.sh/test.sh` 默认改为 `rank-replace` 单模型；两模型集成保留为 `ensemble` 可选模式。
 - `v1.5.0` `noid-rank-sharp` 3 窗口短测后结论是否定的：不改特征和模型，只降低真实收益 softmax 温度，结果反而略差于同日期 `rank-replace`，说明当前 listwise 监督信号不是主要瓶颈。
+- `v1.6.0` `noid-rank-cleanrisk` 24 窗口明显变差：虽然引入了清洗启发的流动性/回撤风险特征，但均值低于 `v1.4.5 rank-replace`，不应继续扩跑。
 
 ## 版本记录
 
@@ -57,6 +58,7 @@
 | `v1.4.8` | `ensemble-lowvol` 使用 `v1.4.7+v1.4.5` | 24 | `0.014062` | 与 `v1.4.6` 完全一致；优于 noid，但低于 rank-replace，不建议作为当前默认提交主线。 |
 | `v1.4.9` | 默认提交入口切到 rank-replace，新增 trend-quality 短测 | 3 | `-0.067912` | `train.sh/test.sh` 默认使用 `model/rank_replace`；`noid-rank-trendq` 最新 3 窗口全负，均值低于同日期 `v1.4.5` 约 `0.048780`，不扩跑。 |
 | `v1.5.0` | `noid-rank-sharp` 3 窗口短测 | 3 | `-0.024860` | 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`；同日期对照下 0/3 胜出，均值略差，先止损。 |
+| `v1.6.0` | `noid-rank-cleanrisk` 24 窗口 | 24 | `0.000872` | 在 `noid-rank-replace` 上追加清洗启发的流动性/回撤风险特征后明显变差；`24/24` 里只有 `12` 个窗口比 `rank-replace` 更好，不值得扩跑。 |
 
 ## 后续记录规范
 

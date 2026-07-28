@@ -247,7 +247,7 @@ BDC_ENSEMBLE_SOURCES=v1.4.7,v1.4.5 sh tune.sh v1.4.8 ensemble-lowvol --windows 2
 
 比较多个实验时，`validate_experiments.py` 会额外输出 `config_comparison.csv`，并在 `readme.md` 里提示关键训练预算是否不一致。若 `BDC_NUM_EPOCHS`、训练目标日、每日股票数、模型规模等不同，应先把结果当作参考，避免直接下结论。
 
-下一步推荐先跑 `v1.6.0 noid-rank-cleanrisk` 的 3 窗口短测，再决定是否扩到 12/24 窗口并和 `v1.4.5 noid-rank-replace` 做同窗口对照。不要再优先调低波动重排，因为两模型 top5 并集有多样性，但当前重排规则没超过 rank-replace。
+下一步不再推荐扩跑 `v1.6.0 noid-rank-cleanrisk`。它的 24 窗口结果已经明显差于 `rank-replace`，说明清洗启发的流动性/回撤风险特征不适合作为当前主线。若继续做特征改动，应重新回到更强的金融假设，而不是在 cleanrisk 上继续加宽。
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 
