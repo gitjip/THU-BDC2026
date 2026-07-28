@@ -229,7 +229,28 @@ sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 
 `v1.4.9 noid-rank-trendq` 追加趋势质量特征后，最新 3 窗口均值约 `-0.067912`，相对同日期 `v1.4.5 rank-replace` 平均低约 `0.048780`，且 3 个窗口都未胜出。这个结果更像特征噪声或重复信号，不像训练过程欠优化；不建议用更多 epoch 或更大模型去补救这组特征。
 
-## 12. 平台期和震荡判断
+## 12. v1.5.0 排序监督信号实验
+
+当前默认 `WeightedRankingLoss` 的 listwise 部分会对真实 5 日收益率做 softmax。由于单个窗口内的收益率通常只是几个百分点，默认温度 `1.0` 会让目标分布接近均匀，真实第一名和普通股票在 listwise loss 中的差异不够明显。pairwise loss 仍会提供排序信号，但它也在尝试学习完整横截面排序，而最终提交只关心前 5 只。
+
+`v1.5.0` 新增 `BDC_LOSS_TARGET_TEMPERATURE`，默认仍等于 `BDC_LOSS_TEMPERATURE=1.0`，因此不设置时与旧逻辑等价。新 profile：
+
+```bash
+sh tune.sh v1.5.0 noid-rank-sharp --windows 3 --skip-final
+```
+
+该档位基于当前默认候选 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`，不改特征、模型、训练窗口、epoch、采样或优化器。目标是让 listwise 目标更尖锐，先观察源模型的 top5、top20、top50 排序信号是否改善。
+
+验收重点：
+
+- 最近 3 窗口均值是否接近或超过同日期 `v1.4.5 noid-rank-replace`；
+- 最差窗口是否没有明显恶化；
+- `prediction_diagnostics_summary.csv` 中 top20/top50 后验收益和 Spearman 是否改善；
+- `training_history.csv` 是否出现更快过拟合，例如最佳 epoch 过早且后续 eval loss 急升。
+
+如果 3 窗口明显弱于 `rank-replace`，不要扩到 24 窗口；这说明更尖锐的监督信号可能只是在放大金融噪声。
+
+## 13. 平台期和震荡判断
 
 优先看每个模型目录里的：
 
@@ -247,7 +268,7 @@ train.log
 - 关闭早停后如果外部分数与早停版相同，先看 `training_history.csv` 里的 `best_epoch` 是否相同。当前预测使用的是最佳内部验证权重，不是最后一轮权重。
 - 对比不同 profile 时，先保证窗口一致。`v1.2.1 large`、2 窗口 `balanced`、3 窗口 `stable` 不能直接下定论，只能作为参考。
 
-## 13. 赛方机器约束
+## 14. 赛方机器约束
 
 赛事文档要求代码可在 i7-13650H、16GB 内存、RTX 4060 8GB 显存、50GB 存储上运行；预测不超过 5 分钟，训练不超过 8 小时，运行时不得联网。
 

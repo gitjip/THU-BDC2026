@@ -170,6 +170,8 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `learning_rate`：默认提交模型为 `3e-5`，debug `3e-5`。
 - `lr_scheduler`：默认 `plateau`，验证 `final_score` 停滞时降低学习率。
 - `early_stopping_patience`：当前 `train.sh` 提交默认 `rank-replace` 为 5，debug 为 2；设为 0 可关闭早停。
+- `loss_temperature`：默认 1.0；控制模型预测分数在 listwise loss 中的 softmax 温度。
+- `loss_target_temperature`：默认等于 `loss_temperature`；可用 `BDC_LOSS_TARGET_TEMPERATURE=0.05` 让真实收益目标分布更尖锐，强化 top 股票排序信号。
 - `use_instrument_feature`：默认开启；可用 `BDC_USE_INSTRUMENT_FEATURE=0` 从模型输入中移除股票编号特征。
 - `use_market_relative_features`：默认关闭；可用 `BDC_USE_MARKET_RELATIVE_FEATURES=1` 追加市场相对特征。
 - `use_trend_quality_features`：默认关闭；可用 `BDC_USE_TREND_QUALITY_FEATURES=1` 追加趋势质量特征。
@@ -197,6 +199,7 @@ BDC_USE_INSTRUMENT_FEATURE=0 BDC_USE_MARKET_RELATIVE_FEATURES=1 sh train.sh debu
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_USE_CROSS_SECTIONAL_RANKS=1 sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite sh train.sh debug
+BDC_LOSS_TARGET_TEMPERATURE=0.05 sh tune.sh v1.5.0 noid-rank-replace --windows 3 --skip-final
 BDC_NUM_EPOCHS=30 BDC_LR_SCHEDULER=off BDC_EARLY_STOPPING_PATIENCE=0 sh tune.sh v1.2.10 noid --skip-final
 BDC_SUBMISSION_MODE=single sh train.sh
 BDC_SUBMISSION_MODE=single sh test.sh

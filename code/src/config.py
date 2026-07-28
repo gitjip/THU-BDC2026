@@ -35,6 +35,12 @@ if not 1 <= top_k <= 5:
 total_exposure = _env_float('BDC_TOTAL_EXPOSURE', 1.0)
 if not 0.0 <= total_exposure <= 1.0:
     raise ValueError(f"BDC_TOTAL_EXPOSURE must be between 0 and 1, current: {total_exposure}")
+loss_temperature = _env_float('BDC_LOSS_TEMPERATURE', 1.0)
+if loss_temperature <= 0:
+    raise ValueError(f"BDC_LOSS_TEMPERATURE must be positive, current: {loss_temperature}")
+loss_target_temperature = _env_float('BDC_LOSS_TARGET_TEMPERATURE', loss_temperature)
+if loss_target_temperature <= 0:
+    raise ValueError(f"BDC_LOSS_TARGET_TEMPERATURE must be positive, current: {loss_target_temperature}")
 use_cross_sectional_rank_features_flag = _env_bool('BDC_USE_CROSS_SECTIONAL_RANKS', False)
 rank_mode_value = os.environ.get('BDC_CROSS_SECTIONAL_RANK_MODE')
 if rank_mode_value in (None, ''):
@@ -117,6 +123,8 @@ config = {
     'pairwise_weight': 1, # 配对损失权重
     'base_weight': 1.0, # 非top-k样本权重
     'top5_weight': 2.0, # top-5样本权重（应大于base_weight）
+    'loss_temperature': loss_temperature,
+    'loss_target_temperature': loss_target_temperature,
 
     'output_dir': os.environ.get('BDC_OUTPUT_DIR', f'./model/{output_dir_prefix}{sequence_length}_{feature_dir_label}'),
     'data_path': './data',

@@ -60,6 +60,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-rank` | 去编号+横截面rank | 3 | 39(no instrument)+rank | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-lite` | 去编号+小范围rank替代 | 3 | 39(no instrument, 7 rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-replace` | 去编号+rank替代绝对量价 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-sharp` | rank替代+更尖锐listwise目标 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2, target_temp=0.05 | 30 |
 | `noid-rank-trendq` | rank替代+趋势质量 | 3 | 39(no instrument, rank replace)+5 trendq | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 30 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
@@ -70,7 +71,7 @@ sh tune.sh quick --skip-final --resume
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
 
 `noid` 源自 `balanced` 小模型配置，但当前属于主线对照档：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`，并使用 30 epoch 上限。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。如果要重新严格比较是否保留 `instrument`，应给 `balanced` 显式设置相同 epoch 上限。
 
@@ -81,6 +82,8 @@ sh tune.sh quick --skip-final --resume
 `noid-rank-lite` 是 `noid-rank-replace` 的小范围版本：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`、`BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite`，只替换开高低收、成交量、成交额和涨跌额 7 个原始价量尺度列。
 
 `noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。`v1.4.7/8` 公平预算复核后，它是当前最强单模型候选，也是默认提交配置。
+
+`noid-rank-sharp` 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`。它不改特征、不改模型、不改训练预算，目的是让 listwise loss 中的真实收益分布不再接近均匀，从而强化“真实高收益股票应排到前面”的监督信号。它应先跑最近 3 窗口；如果均值、最差窗口、top20/top50 后验收益没有接近或超过 `noid-rank-replace`，不要扩到 24 窗口。
 
 `noid-rank-trendq` 基于 `noid-rank-replace`，追加 5 个趋势质量特征：波动调整动量、20 日区间位置、20 日回撤和 10 日上涨占比。它用于测试“上涨质量”能否改善 rank-replace 的 top20/top50 排序，不改变模型结构。`v1.4.9` 最新 3 窗口短测均值约 `-0.067912`，相对同日期 `v1.4.5 noid-rank-replace` 平均低约 `0.048780`，不建议扩跑。
 
@@ -134,6 +137,7 @@ sh tune.sh v1.3.3 noid-marketrel --windows 3 --skip-final
 sh tune.sh v1.3.0 noid-rank --windows 3 --skip-final
 sh tune.sh v1.3.4 noid-rank-lite --windows 3 --skip-final
 sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
+sh tune.sh v1.5.0 noid-rank-sharp --windows 3 --skip-final
 sh tune.sh v1.4.9 noid-rank-trendq --windows 3 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final
 sh tune.sh v1.2.14 noid-full --windows 3 --skip-final

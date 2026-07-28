@@ -183,9 +183,16 @@ class WeightedRankingLoss(nn.Module):
     """
     组合的加权排序损失函数，着重强调top-k的样本。
     """
-    def __init__(self, temperature=1.0, k=5, weight_factor=2.0, pairwise_weight=1, base_weight=1.0):
+    def __init__(self, temperature=1.0, target_temperature=None, k=5, weight_factor=2.0, pairwise_weight=1, base_weight=1.0):
         super(WeightedRankingLoss, self).__init__()
+        if temperature <= 0:
+            raise ValueError(f"temperature must be positive, current: {temperature}")
+        if target_temperature is None:
+            target_temperature = temperature
+        if target_temperature <= 0:
+            raise ValueError(f"target_temperature must be positive, current: {target_temperature}")
         self.temperature = temperature
+        self.target_temperature = target_temperature
         self.k = k
         self.weight_factor = weight_factor
         self.pairwise_weight = pairwise_weight
@@ -195,7 +202,7 @@ class WeightedRankingLoss(nn.Module):
         """加权的Listwise损失 (KL散度 + Cross Entropy)"""
         
         pred_probs = F.softmax(y_pred / self.temperature, dim=1)
-        target_probs = F.softmax(y_true / self.temperature, dim=1)
+        target_probs = F.softmax(y_true / self.target_temperature, dim=1)
 
         # 加权 Cross Entropy（原实现未使用 weights）
         weighted_ce = -(target_probs * torch.log(pred_probs + 1e-12) * weights)
@@ -838,7 +845,8 @@ def main():
     # 7. 损失函数和优化器
     criterion = WeightedRankingLoss(
         k=5,
-        temperature=1.0,
+        temperature=config.get('loss_temperature', 1.0),
+        target_temperature=config.get('loss_target_temperature', config.get('loss_temperature', 1.0)),
         weight_factor=config['top5_weight'],
         pairwise_weight=config['pairwise_weight'],
         base_weight=config.get('base_weight', 1.0)
@@ -846,7 +854,7 @@ def main():
     optimizer = build_optimizer(model)
     scheduler = build_lr_scheduler(get_scheduler_optimizer(optimizer))
     logger.info(
-        "训练策略: epochs<=%s, lr=%s, weight_decay=%s, optimizer=%s, lookahead_k=%s, lookahead_alpha=%s, scheduler=%s, lr_patience=%s, lr_threshold=%s, early_stopping_patience=%s, grad_clip=%s",
+        "训练策略: epochs<=%s, lr=%s, weight_decay=%s, optimizer=%s, lookahead_k=%s, lookahead_alpha=%s, scheduler=%s, lr_patience=%s, lr_threshold=%s, early_stopping_patience=%s, grad_clip=%s, loss_temperature=%s, loss_target_temperature=%s",
         config['num_epochs'],
         config['learning_rate'],
         config.get('weight_decay', 1e-5),
@@ -858,6 +866,8 @@ def main():
         config.get('lr_threshold', 1e-4),
         config.get('early_stopping_patience', 0),
         config.get('enable_grad_clip', True),
+        config.get('loss_temperature', 1.0),
+        config.get('loss_target_temperature', config.get('loss_temperature', 1.0)),
     )
     
     # 8. 排序模型训练
