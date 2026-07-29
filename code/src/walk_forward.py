@@ -58,6 +58,7 @@ PROFILE_DESCRIPTIONS = {
     "noid-lowvol": "noid + 低波动二阶段后处理，用于测试候选池低波动优先是否改善 top5。",
     "ensemble-lowvol": "复用 noid 与 rank-replace 模型，测试两模型 top5 并集低波动重排。",
     "ensemble-lowoverheat": "复用 rank-replace 与 LightGBM 模型，测试两模型 top5 并集低过热重排。",
+    "ensemble-gate-overheat": "复用 rank-replace 与 LightGBM 模型，测试主模型 top5 过热时切低过热防守集成。",
     "smooth": "Lookahead 优化器对照档，用于测试优化器抗震荡效果。",
     "stable": "更强正则化对照档，保留 instrument 输入。",
     "large": "慢速候选复核档，较大前馈层和更多层数。",
@@ -95,6 +96,7 @@ NOTE_CONFIG_KEYS = [
     "BDC_LOSS_TARGET_TEMPERATURE",
     "BDC_STAGE2_POOL_SIZE",
     "BDC_STAGE2_VOL_WINDOW",
+    "BDC_GATE_OVERHEAT_THRESHOLD",
     "BDC_ENSEMBLE_SOURCES",
     "BDC_USE_CROSS_SECTIONAL_RANKS",
     "BDC_CROSS_SECTIONAL_RANK_MODE",
@@ -518,25 +520,50 @@ def experiment_model_kind(experiment_dir: Path | None) -> str:
     return current_model_kind(tune_env)
 
 
+def source_window_dir_for(
+    source_experiment_dir: Path, window: WalkForwardWindow
+) -> Path:
+    windows_dir = source_experiment_dir / "windows"
+    desired_identity = window_date_identity(window)
+    desired_key = window_identity_key(window)
+    named_dir = windows_dir / window.name
+
+    if named_dir.exists():
+        metadata = read_json(named_dir / "metadata.json")
+        source_window = metadata.get("window") or {}
+        if window_date_identity(source_window) == desired_identity:
+            return named_dir
+
+    matches = []
+    if windows_dir.exists():
+        for child in sorted(windows_dir.iterdir()):
+            if not child.is_dir() or not child.name.startswith("window_"):
+                continue
+            metadata = read_json(child / "metadata.json")
+            source_window = metadata.get("window") or {}
+            if window_identity_key(source_window) == desired_key:
+                matches.append(child)
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"{source_experiment_dir} 中存在多个匹配当前窗口日期的源窗口: "
+            f"{', '.join(path.name for path in matches)}"
+        )
+
+    raise ValueError(
+        f"{source_experiment_dir} 中找不到匹配当前 {window.name} 的源窗口，"
+        f"as_of={window.as_of_date}, target_dates={format_date_list(window.target_dates)}"
+    )
+
+
 def source_window_model_dir(
     source_experiment_dir: Path | None, window: WalkForwardWindow
 ) -> Path | None:
     if source_experiment_dir is None:
         return None
-    source_window_dir = source_experiment_dir / "windows" / window.name
-    metadata = read_json(source_window_dir / "metadata.json")
-    source_window = metadata.get("window") or {}
-    if source_window:
-        source_target_dates = format_date_list(source_window.get("target_dates") or [])
-        if source_window.get(
-            "as_of_date"
-        ) != window.as_of_date or source_target_dates != format_date_list(
-            window.target_dates
-        ):
-            raise ValueError(
-                f"{source_window_dir} 的窗口日期与当前 {window.name} 不一致，不能复用模型"
-            )
-
+    source_window_dir = source_window_dir_for(source_experiment_dir, window)
     model_dir = source_window_dir / "model"
     model_kind = experiment_model_kind(source_experiment_dir)
     if not model_artifacts_exist(model_dir, model_kind=model_kind):
@@ -958,6 +985,7 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
         "BDC_LOSS_TARGET_TEMPERATURE",
         "BDC_STAGE2_POOL_SIZE",
         "BDC_STAGE2_VOL_WINDOW",
+        "BDC_GATE_OVERHEAT_THRESHOLD",
         "BDC_ENSEMBLE_SOURCES",
         "BDC_USE_CROSS_SECTIONAL_RANKS",
         "BDC_CROSS_SECTIONAL_RANK_MODE",
@@ -1205,6 +1233,7 @@ def write_ensemble_prediction(
         top_k=parse_int_env("BDC_TOP_K", 5),
         total_exposure=parse_float_env("BDC_TOTAL_EXPOSURE", 1.0),
         volatility_window=parse_int_env("BDC_STAGE2_VOL_WINDOW", 20),
+        gate_overheat_threshold=parse_float_env("BDC_GATE_OVERHEAT_THRESHOLD", 0.70),
     )
 
     prediction_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1220,6 +1249,21 @@ def write_ensemble_prediction(
         "selection_strategy": strategy,
         "top_k": parse_int_env("BDC_TOP_K", 5),
         "total_exposure": parse_float_env("BDC_TOTAL_EXPOSURE", 1.0),
+        "gate_overheat_threshold": parse_float_env("BDC_GATE_OVERHEAT_THRESHOLD", 0.70),
+        "gate_use_defense": bool(
+            scores.get("gate_use_defense", pd.Series([False])).iloc[0]
+        ),
+        "gate_primary_source": (
+            str(scores.get("gate_primary_source", pd.Series([""])).iloc[0])
+            if len(scores)
+            else ""
+        ),
+        "gate_primary_top5_overheat_mean": (
+            None
+            if "gate_primary_top5_overheat_mean" not in scores.columns
+            or pd.isna(scores["gate_primary_top5_overheat_mean"].iloc[0])
+            else float(scores["gate_primary_top5_overheat_mean"].iloc[0])
+        ),
         "source_top5": source_top5,
         "selected": selected["stock_id"].tolist(),
         "candidate_count": int((scores["stage2_pool_member"] == True).sum()),

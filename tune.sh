@@ -66,6 +66,10 @@ case "${1:-}" in
     profile="ensemble-lowoverheat"
     shift
     ;;
+  ensemble-gate-overheat|ensemble-overheat-gate|gate-overheat|overheat-gate|--ensemble-gate-overheat|--ensemble-overheat-gate|--gate-overheat|--overheat-gate)
+    profile="ensemble-gate-overheat"
+    shift
+    ;;
   noid-marketrel|marketrel|--noid-marketrel|--marketrel)
     profile="noid-marketrel"
     shift
@@ -957,6 +961,16 @@ case "$profile" in
     set_default BDC_TORCH_NUM_THREADS 4
     set_default BDC_TENSORBOARD 0
     ;;
+  ensemble-gate-overheat)
+    set_default BDC_WF_WINDOWS 24
+    set_default BDC_ENSEMBLE_SOURCES v1.4.5,v1.12.0
+    set_default BDC_SELECTION_STRATEGY ensemble_gate_overheat_top5
+    set_default BDC_GATE_OVERHEAT_THRESHOLD 0.70
+    set_default BDC_STAGE2_VOL_WINDOW 20
+    set_default BDC_NUM_PROCESSES 6
+    set_default BDC_TORCH_NUM_THREADS 4
+    set_default BDC_TENSORBOARD 0
+    ;;
   smooth)
     set_default BDC_WF_WINDOWS 3
     set_default BDC_FEATURE_NUM 39
@@ -1077,7 +1091,7 @@ case "$profile" in
     set_default BDC_TENSORBOARD 0
     ;;
   *)
-    echo "未知 tune profile: $profile，可选 quick、balanced、noid、noid-lowvol、ensemble-lowvol、ensemble-lowoverheat、noid-marketrel、noid-rank、noid-rank-lite、noid-rank-replace、noid-rank-lgbm、noid-rank-sharp、noid-rank-trendq、noid-rank-cleanrisk、noid-rank-multiperiod、noid-rank-breadth、noid-rank-marketenv、noid-rank-marketenv-lite、noid-rank-marketenv-roll、noid-rank-momdelta、noid-rank-riskadj、noid-rank-ret5rank、noid-rank-overheatguard、noid-stable、noid-full、smooth、stable、large、full。" >&2
+    echo "未知 tune profile: $profile，可选 quick、balanced、noid、noid-lowvol、ensemble-lowvol、ensemble-lowoverheat、ensemble-gate-overheat、noid-marketrel、noid-rank、noid-rank-lite、noid-rank-replace、noid-rank-lgbm、noid-rank-sharp、noid-rank-trendq、noid-rank-cleanrisk、noid-rank-multiperiod、noid-rank-breadth、noid-rank-marketenv、noid-rank-marketenv-lite、noid-rank-marketenv-roll、noid-rank-momdelta、noid-rank-riskadj、noid-rank-ret5rank、noid-rank-overheatguard、noid-stable、noid-full、smooth、stable、large、full。" >&2
     exit 2
     ;;
 esac

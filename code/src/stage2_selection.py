@@ -9,6 +9,7 @@ LOW_VOL_THEN_RANK_TOP5 = "low_vol_then_rank_top5"
 ENSEMBLE_AVG_RANK_TOP5 = "ensemble_avg_rank_top5"
 ENSEMBLE_LOW_VOL_TOP5 = "ensemble_low_vol_top5"
 ENSEMBLE_LOW_OVERHEAT_TOP5 = "ensemble_low_overheat_top5"
+ENSEMBLE_GATE_OVERHEAT_TOP5 = "ensemble_gate_overheat_top5"
 RISK_METRIC_COLUMNS = [
     "stock_id",
     "stock_prefix",
@@ -89,12 +90,17 @@ def normalize_ensemble_selection_strategy(value: str | None) -> str:
         "top5_union_low_overheat": ENSEMBLE_LOW_OVERHEAT_TOP5,
         "union_low_overheat": ENSEMBLE_LOW_OVERHEAT_TOP5,
         "low_overheat_then_rank_top5": ENSEMBLE_LOW_OVERHEAT_TOP5,
+        "ensemble_gate_overheat": ENSEMBLE_GATE_OVERHEAT_TOP5,
+        "ensemble_gate_overheat_top5": ENSEMBLE_GATE_OVERHEAT_TOP5,
+        "gate_overheat": ENSEMBLE_GATE_OVERHEAT_TOP5,
+        "gate_overheat_top5": ENSEMBLE_GATE_OVERHEAT_TOP5,
+        "overheat_gate": ENSEMBLE_GATE_OVERHEAT_TOP5,
     }
     if strategy not in aliases:
         raise ValueError(
             f"Unsupported ensemble selection strategy: {value}. "
             f"Supported: {ENSEMBLE_AVG_RANK_TOP5}, {ENSEMBLE_LOW_VOL_TOP5}, "
-            f"{ENSEMBLE_LOW_OVERHEAT_TOP5}"
+            f"{ENSEMBLE_LOW_OVERHEAT_TOP5}, {ENSEMBLE_GATE_OVERHEAT_TOP5}"
         )
     return aliases[strategy]
 
@@ -339,11 +345,15 @@ def select_ensemble_predictions(
     top_k: int = 5,
     total_exposure: float = 1.0,
     volatility_window: int = 20,
+    gate_overheat_threshold: float = 0.70,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     strategy = normalize_ensemble_selection_strategy(strategy)
     top_k, total_exposure = validate_submission_controls(top_k, total_exposure)
+    gate_overheat_threshold = float(gate_overheat_threshold)
 
     combined = build_ensemble_scores(score_frames)
+    primary_label = score_frames[0][0]
+    primary_rank_column = f"rank_{primary_label}"
     candidates = combined[combined["top5_vote_count"] > 0].copy()
     if len(candidates) < top_k:
         raise ValueError(
@@ -375,8 +385,36 @@ def select_ensemble_predictions(
             .head(top_k)
             .copy()
         )
+    elif strategy == ENSEMBLE_GATE_OVERHEAT_TOP5:
+        primary_top5 = (
+            candidates[candidates[primary_rank_column].le(top_k)]
+            .sort_values(primary_rank_column)
+            .head(top_k)
+            .copy()
+        )
+        if len(primary_top5) < top_k:
+            raise ValueError(
+                f"primary source {primary_label} top{top_k} candidates不足 {top_k} 只，"
+                f"当前仅有 {len(primary_top5)} 只"
+            )
+        primary_overheat_mean = float(primary_top5["overheat_rank"].mean())
+        use_defense = primary_overheat_mean >= gate_overheat_threshold
+        if use_defense:
+            selected = (
+                candidates.sort_values(
+                    ["overheat_rank", "avg_rank_fill", "min_rank_fill"]
+                )
+                .head(top_k)
+                .copy()
+            )
+        else:
+            selected = primary_top5.copy()
     else:
         raise ValueError(f"Unsupported ensemble selection strategy: {strategy}")
+
+    if strategy != ENSEMBLE_GATE_OVERHEAT_TOP5:
+        primary_overheat_mean = float("nan")
+        use_defense = False
 
     selected = selected.reset_index(drop=True)
     selected["stage2_selection_rank"] = range(1, len(selected) + 1)
@@ -391,6 +429,19 @@ def select_ensemble_predictions(
     annotated["selection_strategy"] = strategy
     annotated["stage2_pool_member"] = annotated["top5_vote_count"] > 0
     annotated["stage2_selection_rank"] = annotated["stock_id"].map(rank_map)
+    annotated["gate_primary_source"] = (
+        primary_label if strategy == ENSEMBLE_GATE_OVERHEAT_TOP5 else ""
+    )
+    annotated["gate_overheat_threshold"] = (
+        gate_overheat_threshold if strategy == ENSEMBLE_GATE_OVERHEAT_TOP5 else pd.NA
+    )
+    annotated["gate_primary_top5_overheat_mean"] = (
+        primary_overheat_mean if strategy == ENSEMBLE_GATE_OVERHEAT_TOP5 else pd.NA
+    )
+    annotated["gate_use_defense"] = bool(use_defense)
+    annotated["gate_defense_strategy"] = (
+        ENSEMBLE_LOW_OVERHEAT_TOP5 if strategy == ENSEMBLE_GATE_OVERHEAT_TOP5 else ""
+    )
     annotated = assign_equal_weights(annotated, selected_ids, top_k, total_exposure)
     annotated = annotated.sort_values(
         ["selected", "stage2_selection_rank", "ensemble_rank_before_stage2"],

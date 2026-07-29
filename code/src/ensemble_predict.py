@@ -11,10 +11,13 @@ import pandas as pd
 
 from config import config
 from data_utils import load_stock_data, normalize_stock_codes, setup_logging
-from ensemble_config import ENSEMBLE_SELECTION_STRATEGY, ENSEMBLE_VOL_WINDOW, get_submission_ensemble_sources
+from ensemble_config import (
+    ENSEMBLE_SELECTION_STRATEGY,
+    ENSEMBLE_VOL_WINDOW,
+    get_submission_ensemble_sources,
+)
 from predict import default_scores_output_path, resolve_prediction_task
 from stage2_selection import select_ensemble_predictions
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
@@ -24,7 +27,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="正式提交用两模型集成预测")
     parser.add_argument(
         "--submission-date",
-        default=os.environ.get("BDC_SUBMISSION_DATE", config.get("submission_deadline_date", "2026-08-02")),
+        default=os.environ.get(
+            "BDC_SUBMISSION_DATE", config.get("submission_deadline_date", "2026-08-02")
+        ),
         help="提交截止日，默认 2026-08-02；预测窗口必须在该日期之后",
     )
     parser.add_argument(
@@ -39,12 +44,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--market-holidays",
-        default=os.environ.get("BDC_MARKET_HOLIDAYS", config.get("market_holidays", "")),
+        default=os.environ.get(
+            "BDC_MARKET_HOLIDAYS", config.get("market_holidays", "")
+        ),
         help="未来休市日，逗号分隔，例如 2026-10-01,2026-10-02",
     )
     parser.add_argument(
         "--output",
-        default=config.get("prediction_output_path", os.path.join("./output/", "result.csv")),
+        default=config.get(
+            "prediction_output_path", os.path.join("./output/", "result.csv")
+        ),
         help="预测结果输出路径，默认 ./output/result.csv",
     )
     parser.add_argument(
@@ -59,7 +68,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--ensemble-selection-strategy",
-        default=os.environ.get("BDC_ENSEMBLE_SELECTION_STRATEGY", ENSEMBLE_SELECTION_STRATEGY),
+        default=os.environ.get(
+            "BDC_ENSEMBLE_SELECTION_STRATEGY", ENSEMBLE_SELECTION_STRATEGY
+        ),
         help="集成重排策略，默认 ensemble_low_vol_top5",
     )
     parser.add_argument(
@@ -71,7 +82,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--total-exposure",
         type=float,
-        default=float(os.environ.get("BDC_TOTAL_EXPOSURE", config.get("total_exposure", 1.0))),
+        default=float(
+            os.environ.get("BDC_TOTAL_EXPOSURE", config.get("total_exposure", 1.0))
+        ),
         help="总仓位，0到1之间，默认1.0；小于1表示留现金",
     )
     parser.add_argument(
@@ -80,8 +93,16 @@ def parse_args() -> argparse.Namespace:
         default=int(os.environ.get("BDC_STAGE2_VOL_WINDOW", ENSEMBLE_VOL_WINDOW)),
         help="二阶段波动率计算窗口，默认 20 个交易日",
     )
+    parser.add_argument(
+        "--gate-overheat-threshold",
+        type=float,
+        default=float(os.environ.get("BDC_GATE_OVERHEAT_THRESHOLD", 0.70)),
+        help="过热门控阈值，仅 ensemble_gate_overheat_top5 使用，默认 0.70",
+    )
     parser.add_argument("--debug", action="store_true", help="使用 debug 集成模型目录")
-    parser.add_argument("--dry-run", action="store_true", help="只打印预测命令，不实际运行")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="只打印预测命令，不实际运行"
+    )
     return parser.parse_args()
 
 
@@ -113,7 +134,13 @@ def add_optional_date_args(command: list[str], args: argparse.Namespace) -> None
         command.extend(["--market-holidays", args.market_holidays])
 
 
-def run_source_predict(label: str, env: dict[str, str], result_path: Path, scores_path: Path, args: argparse.Namespace) -> float:
+def run_source_predict(
+    label: str,
+    env: dict[str, str],
+    result_path: Path,
+    scores_path: Path,
+    args: argparse.Namespace,
+) -> float:
     result_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
@@ -142,7 +169,9 @@ def run_source_predict(label: str, env: dict[str, str], result_path: Path, score
     return duration
 
 
-def read_history_until_as_of(args: argparse.Namespace) -> tuple[pd.DataFrame, list[str]]:
+def read_history_until_as_of(
+    args: argparse.Namespace,
+) -> tuple[pd.DataFrame, list[str]]:
     raw_df, data_file = load_stock_data(
         config["data_path"],
         data_file=config.get("stock_data_file"),
@@ -163,7 +192,9 @@ def read_history_until_as_of(args: argparse.Namespace) -> tuple[pd.DataFrame, li
 
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def read_prediction_scores_csv(path: Path) -> pd.DataFrame:
@@ -178,7 +209,11 @@ def read_prediction_scores_csv(path: Path) -> pd.DataFrame:
     frame["stock_id"] = normalize_stock_codes(frame["stock_id"])
     frame["rank"] = pd.to_numeric(frame["rank"], errors="coerce")
     frame["pred_score"] = pd.to_numeric(frame["pred_score"], errors="coerce")
-    frame = frame.dropna(subset=["rank", "stock_id"]).sort_values("rank").reset_index(drop=True)
+    frame = (
+        frame.dropna(subset=["rank", "stock_id"])
+        .sort_values("rank")
+        .reset_index(drop=True)
+    )
     frame["rank"] = frame["rank"].astype(int)
     return frame
 
@@ -187,14 +222,21 @@ def main() -> None:
     global logger
     args = parse_args()
     output_path = Path(args.output)
-    scores_output_path = Path(args.scores_output or default_scores_output_path(str(output_path)))
+    scores_output_path = Path(
+        args.scores_output or default_scores_output_path(str(output_path))
+    )
     temp_dir = Path(args.temp_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     scores_output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging("bdc.ensemble_predict", output_path.parent / "predict.log")
 
-    debug = args.debug or os.environ.get("BDC_FAST_DEV", "").strip().lower() in {"1", "true", "yes", "on"}
+    debug = args.debug or os.environ.get("BDC_FAST_DEV", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     sources = get_submission_ensemble_sources(debug=debug)
     logger.info("提交集成预测模式: %s", "debug" if debug else "official")
     logger.info("最终输出: %s", output_path)
@@ -207,17 +249,23 @@ def main() -> None:
         source_dir = temp_dir / source.label
         source_result = source_dir / "result.csv"
         source_scores = source_dir / "result_scores.csv"
-        total_predict_seconds += run_source_predict(source.label, source.env, source_result, source_scores, args)
+        total_predict_seconds += run_source_predict(
+            source.label, source.env, source_result, source_scores, args
+        )
         score_paths.append((source.label, source_scores))
         if not args.dry_run:
             frame = read_prediction_scores_csv(source_scores)
-            source_top5[source.label] = frame.sort_values("rank").head(5)["stock_id"].tolist()
+            source_top5[source.label] = (
+                frame.sort_values("rank").head(5)["stock_id"].tolist()
+            )
 
     if args.dry_run:
         return
 
     history, target_dates = read_history_until_as_of(args)
-    score_frames = [(label, read_prediction_scores_csv(path)) for label, path in score_paths]
+    score_frames = [
+        (label, read_prediction_scores_csv(path)) for label, path in score_paths
+    ]
     selected, scores = select_ensemble_predictions(
         score_frames,
         history=history,
@@ -225,6 +273,7 @@ def main() -> None:
         top_k=args.top_k,
         total_exposure=args.total_exposure,
         volatility_window=args.stage2_vol_window,
+        gate_overheat_threshold=args.gate_overheat_threshold,
     )
     selected[["stock_id", "weight"]].to_csv(output_path, index=False)
     scores.to_csv(scores_output_path, index=False)
@@ -235,6 +284,21 @@ def main() -> None:
         "top_k": args.top_k,
         "total_exposure": args.total_exposure,
         "stage2_vol_window": args.stage2_vol_window,
+        "gate_overheat_threshold": args.gate_overheat_threshold,
+        "gate_use_defense": bool(
+            scores.get("gate_use_defense", pd.Series([False])).iloc[0]
+        ),
+        "gate_primary_source": (
+            str(scores.get("gate_primary_source", pd.Series([""])).iloc[0])
+            if len(scores)
+            else ""
+        ),
+        "gate_primary_top5_overheat_mean": (
+            None
+            if "gate_primary_top5_overheat_mean" not in scores.columns
+            or pd.isna(scores["gate_primary_top5_overheat_mean"].iloc[0])
+            else float(scores["gate_primary_top5_overheat_mean"].iloc[0])
+        ),
         "target_dates": target_dates,
         "sources": [
             {

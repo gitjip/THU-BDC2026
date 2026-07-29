@@ -119,6 +119,14 @@ sh tune.sh v1.12.1 ensemble-lowoverheat --windows 24 --skip-final
 
 结论：LightGBM 和低过热集成仍有防守价值，但当前更适合作为门控诊断对象。`v1.12.3` 统一指标口径后，`v1.12.1 / gate_tf_overheat_ge_0p7` 在均值、CVaR20、worst3 和高分误切约束下通过默认候选检查；但这仍只是离线诊断，需要另起版本接入 walk-forward 复现，不能直接改正式提交默认。
 
+`v1.12.4` 已新增 `ensemble-gate-overheat` 作为复现入口：
+
+```bash
+sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final
+```
+
+它仍复用 `v1.4.5 + v1.12.0`，只是把“主模型 top5 过热时切防守”的门控逻辑接入实际 walk-forward 预测流程。
+
 验收：
 
 - 先与同日期 `v1.4.5 noid-rank-replace` 配对比较；

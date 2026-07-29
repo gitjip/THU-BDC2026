@@ -81,3 +81,42 @@
 - 该规则通过探索、候选和默认候选三层指标检查。
 
 这一步的目的不是证明某个规则可提交，而是先固定评估口径。`gate_tf_overheat_ge_0p7` 现在可以视为“值得另起版本接入 walk-forward 复现”的默认候选，但不能直接改正式提交默认。之后无论做市场弱势门控、低过热集成还是 LightGBM 防守，都应使用同一套汇总表判断。
+
+## v1.12.4 walk-forward 复现入口
+
+`v1.12.4` 将 `gate_tf_overheat_ge_0p7` 接入为可选 walk-forward profile：
+
+```bash
+sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final
+```
+
+默认配置：
+
+- `BDC_ENSEMBLE_SOURCES=v1.4.5,v1.12.0`；
+- `BDC_SELECTION_STRATEGY=ensemble_gate_overheat_top5`；
+- `BDC_GATE_OVERHEAT_THRESHOLD=0.70`；
+- 第一个源实验 `v1.4.5` 是进攻主模型；
+- 防守分支等价于 `ensemble_low_overheat_top5`，即两个源模型 top5 并集内按低过热选回 5 只。
+
+规则：
+
+1. 对第一个源模型 top5 计算预测日前历史 `overheat_rank` 均值；
+2. 若均值 `>= 0.70`，切到低过热集成防守；
+3. 否则保留第一个源模型原始 top5；
+4. 最终仍 top5 等权满仓。
+
+复现验收：
+
+- 与 `v1.4.5 rank-replace` 比 `mean_score`、`paired_mean_diff`、`worst3_mean_score`、`cvar_20_score`；
+- 与 `v1.12.1 ensemble-lowoverheat` 比高分窗口是否少被削弱；
+- 检查 `prediction_scores.csv` 和 `windows/*/ensemble_prediction.json` 中的 `gate_use_defense`、`gate_primary_top5_overheat_mean` 是否符合规则；
+- 如果 24 窗口复现仍通过默认候选检查，再讨论是否接入正式提交可选模式。
+
+3 窗口烟测已经跑通：
+
+- 命令：`sh tune.sh v1.12.4 ensemble-gate-overheat --windows 3 --skip-final --resume`；
+- 最近 3 个窗口的 `gate_use_defense` 均为 `false`，说明这 3 个窗口没有触发过热门控；
+- 3 窗口均值约 `-0.019112`，只用于确认流程可运行，不能判断策略效果；
+- 完整复现应继续运行 `sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final --resume`。
+
+注意：这仍不改变 `train.sh/test.sh` 默认提交路径。正式默认仍是 rank-replace 单模型。
