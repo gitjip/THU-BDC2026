@@ -187,8 +187,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `use_clean_risk_features`：默认关闭；可用 `BDC_USE_CLEAN_RISK_FEATURES=1` 追加无成交、流动性和回撤风险特征。
 - `use_multi_period_features`：默认关闭；可用 `BDC_USE_MULTI_PERIOD_FEATURES=1` 追加 3/5/10/20/40 日多周期基础特征。
 - `BDC_SUBMISSION_MODE`：默认 `rank-replace`；设为 `single` 可回退原始单模型入口，设为 `ensemble` 可运行两模型集成候选。
-- `BDC_ENSEMBLE_SELECTION_STRATEGY`：仅集成模式使用，默认 `ensemble_low_vol_top5`，即两个源模型 top5 并集后按低波动重排。
-- `selection_strategy`：仅单模型或源模型预测使用，默认 `model_top5`；可用 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5` 启用单模型低波动二阶段后处理。
+- `BDC_SELECTION_STRATEGY`：单模型默认 `model_top5`，可用 `low_vol_then_rank_top5`；集成模式可用 `ensemble_low_vol_top5` 或 `ensemble_low_overheat_top5`。
 - `top_k`：默认 5；可用 `BDC_TOP_K=3` 只输出前 3 只股票，范围 1 到 5。
 - `total_exposure`：默认 1.0；可用 `BDC_TOTAL_EXPOSURE=0.8` 控制总仓位，范围 0 到 1，未使用权重相当于现金。
 - `stage2_pool_size`：默认 10；低波动后处理从模型前多少名中选回 5 只。

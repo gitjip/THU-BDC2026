@@ -39,12 +39,62 @@ sh tune.sh v1.12.0 noid-rank-lgbm --windows 6 --skip-final
 - LGBM top50 后验收益约 `-0.001600`，同日期 rank-replace 约 `-0.011262`；
 - LGBM 的真实 top5 进入预测 top20 的平均命中数约 `1.00`，同日期 rank-replace 约 `0.83`。
 
+24 窗口补跑结果：
+
+- `v1.12.0 noid-rank-lgbm`：均值约 `0.009367`，最差窗口约 `-0.075276`，正分窗口 `16/24`；
+- `v1.4.5 noid-rank-replace`：均值约 `0.017557`，最差窗口约 `-0.066987`，正分窗口 `14/24`；
+- LGBM 逐窗口 `14/24` 胜出，但在 Transformer 高分窗口明显落后，导致均值仍低；
+- 按 Transformer 得分分组看，Transformer 负分窗口里 LGBM 基本胜出，Transformer 高分窗口里 LGBM 大多落后；
+- LGBM 平均 top20/top50 后验收益和真实 top5 进入 top20 的命中数仍略好，说明它更像“防守型候选池补充”，不是直接 top5 主模型。
+
+基于 `v1.4.5 + v1.12.0` 的候选池诊断：
+
+- 简单 top5 并集等权均值约 `0.013572`，不如 `v1.4.5`；
+- 平均排名、最小排名和 Borda 简单融合也不通过；
+- `low_overheat_then_rank_top5` 均值约 `0.025834`，最差窗口约 `-0.060607`，正分窗口 `19/24`；
+- 该规则只用预测日前历史价格计算短期过热 rank，没有使用目标窗口未来收益。它已接入 `v1.12.1 ensemble-lowoverheat` 作为可选 profile。
+
+注意：上面是读取旧预测诊断文件的离线候选池试算。`v1.12.1` 真正通过 walk-forward 重新调用两个源模型预测后，结果低于这个离线数值。
+
 结论：
 
 - 第一版 LGBM 不能替换默认提交模型，top5 直接收益还没有过关；
 - 训练速度明显更好，6 窗口约 1 分钟完成，适合做快速离线对照；
-- broader ranking 诊断不差，说明它可能适合做候选池补充、二阶段重排输入，或继续尝试 `LGBMRanker`；
-- 下一步不要直接扩大到正式提交，应先用 `LGBMRanker` 或 LightGBM/Transformer 候选池并集做小窗口验证。
+- broader ranking 诊断不差，说明它适合做候选池补充和二阶段重排输入；
+- 下一步优先验证 `ensemble-lowoverheat`，再考虑 `LGBMRanker`。
+
+## v1.12.1 低过热集成 profile
+
+命令：
+
+```bash
+sh tune.sh v1.12.1 ensemble-lowoverheat --windows 24 --skip-final
+```
+
+默认源模型：
+
+- `v1.4.5`：rank-replace Transformer；
+- `v1.12.0`：noid-rank-lgbm。
+
+规则：
+
+1. 两个源模型分别输出 top5；
+2. 取 top5 并集；
+3. 用预测日前历史数据计算 `overheat_rank`，即最近 5/10 日收益较高者的横截面 rank；
+4. 按 `overheat_rank` 从低到高排序，分数接近时用源模型平均排名兜底；
+5. 选回 5 只，仍等权满仓。
+
+注意：这仍是候选策略，不自动改正式提交默认路径。若要用于正式提交，需要先保证 `v1.4.5` 与 `v1.12.0` 风格的最终模型都能由 `train.sh/test.sh` 完整复现。
+
+24 窗口 walk-forward 结果：
+
+- `v1.12.1 ensemble-lowoverheat`：均值约 `0.014789`，最差窗口约 `-0.052577`，正分窗口 `16/24`；
+- 同期 `v1.4.5 rank-replace`：均值约 `0.017557`，最差窗口约 `-0.066987`，正分窗口 `14/24`；
+- 同期 `v1.12.0 LightGBM`：均值约 `0.009367`，最差窗口约 `-0.075276`，正分窗口 `16/24`；
+- 相比 `rank-replace`，`v1.12.1` 均值略低，但最差窗口、top20/top50 后验收益和真实 top5 命中数更好；
+- 它没有解决“保留 Transformer 高分窗口”的问题，尤其 `2026-06-08` 这类高分窗口会被明显削弱。
+
+结论：`ensemble-lowoverheat` 是防守型候选，不应替换默认提交主线。后续若继续这个问题，重点应从“固定规则重排”转向“何时保留 Transformer、何时启用防守模型”的门控诊断。
 
 注意：它不是和 Transformer 的严格架构对照，因为 LightGBM 第一版使用 120 个训练目标日且不做每日股票抽样。这样做是因为 LightGBM 训练很快，第一步更关心“树模型方向是否值得继续”，而不是只比较同预算下的架构差异。
 

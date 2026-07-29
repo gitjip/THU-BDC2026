@@ -4,11 +4,11 @@ import pandas as pd
 
 from data_utils import normalize_stock_codes
 
-
 MODEL_TOP5 = "model_top5"
 LOW_VOL_THEN_RANK_TOP5 = "low_vol_then_rank_top5"
 ENSEMBLE_AVG_RANK_TOP5 = "ensemble_avg_rank_top5"
 ENSEMBLE_LOW_VOL_TOP5 = "ensemble_low_vol_top5"
+ENSEMBLE_LOW_OVERHEAT_TOP5 = "ensemble_low_overheat_top5"
 RISK_METRIC_COLUMNS = [
     "stock_id",
     "stock_prefix",
@@ -25,17 +25,23 @@ RISK_METRIC_COLUMNS = [
 ]
 
 
-def validate_submission_controls(top_k: int, total_exposure: float) -> tuple[int, float]:
+def validate_submission_controls(
+    top_k: int, total_exposure: float
+) -> tuple[int, float]:
     top_k = int(top_k)
     total_exposure = float(total_exposure)
     if not 1 <= top_k <= 5:
         raise ValueError(f"top_k must be between 1 and 5, current: {top_k}")
     if not 0.0 <= total_exposure <= 1.0:
-        raise ValueError(f"total_exposure must be between 0 and 1, current: {total_exposure}")
+        raise ValueError(
+            f"total_exposure must be between 0 and 1, current: {total_exposure}"
+        )
     return top_k, total_exposure
 
 
-def assign_equal_weights(annotated: pd.DataFrame, selected_ids: set[str], top_k: int, total_exposure: float) -> pd.DataFrame:
+def assign_equal_weights(
+    annotated: pd.DataFrame, selected_ids: set[str], top_k: int, total_exposure: float
+) -> pd.DataFrame:
     top_k, total_exposure = validate_submission_controls(top_k, total_exposure)
     annotated = annotated.copy()
     annotated["selected"] = annotated["stock_id"].isin(selected_ids)
@@ -78,11 +84,17 @@ def normalize_ensemble_selection_strategy(value: str | None) -> str:
         "ensemble_low_vol_top5": ENSEMBLE_LOW_VOL_TOP5,
         "top5_union_low_vol": ENSEMBLE_LOW_VOL_TOP5,
         "union_low_vol": ENSEMBLE_LOW_VOL_TOP5,
+        "ensemble_low_overheat": ENSEMBLE_LOW_OVERHEAT_TOP5,
+        "ensemble_low_overheat_top5": ENSEMBLE_LOW_OVERHEAT_TOP5,
+        "top5_union_low_overheat": ENSEMBLE_LOW_OVERHEAT_TOP5,
+        "union_low_overheat": ENSEMBLE_LOW_OVERHEAT_TOP5,
+        "low_overheat_then_rank_top5": ENSEMBLE_LOW_OVERHEAT_TOP5,
     }
     if strategy not in aliases:
         raise ValueError(
             f"Unsupported ensemble selection strategy: {value}. "
-            f"Supported: {ENSEMBLE_AVG_RANK_TOP5}, {ENSEMBLE_LOW_VOL_TOP5}"
+            f"Supported: {ENSEMBLE_AVG_RANK_TOP5}, {ENSEMBLE_LOW_VOL_TOP5}, "
+            f"{ENSEMBLE_LOW_OVERHEAT_TOP5}"
         )
     return aliases[strategy]
 
@@ -96,7 +108,9 @@ def _recent_return(close: pd.Series, days: int) -> float:
     return float(close.iloc[-1] / base - 1.0)
 
 
-def compute_recent_risk_metrics(history: pd.DataFrame, volatility_window: int = 20) -> pd.DataFrame:
+def compute_recent_risk_metrics(
+    history: pd.DataFrame, volatility_window: int = 20
+) -> pd.DataFrame:
     required = {"股票代码", "日期", "收盘"}
     missing = required - set(history.columns)
     if missing:
@@ -108,7 +122,9 @@ def compute_recent_risk_metrics(history: pd.DataFrame, volatility_window: int = 
     data["stock_id"] = normalize_stock_codes(data["股票代码"])
     data["日期"] = pd.to_datetime(data["日期"], errors="coerce").dt.normalize()
     data["收盘"] = pd.to_numeric(data["收盘"], errors="coerce")
-    data = data.dropna(subset=["stock_id", "日期", "收盘"]).sort_values(["stock_id", "日期"])
+    data = data.dropna(subset=["stock_id", "日期", "收盘"]).sort_values(
+        ["stock_id", "日期"]
+    )
 
     rows = []
     for stock_id, group in data.groupby("stock_id", sort=False):
@@ -116,7 +132,9 @@ def compute_recent_risk_metrics(history: pd.DataFrame, volatility_window: int = 
         if close.empty:
             continue
 
-        daily_returns = close.pct_change(fill_method=None).tail(volatility_window).dropna()
+        daily_returns = (
+            close.pct_change(fill_method=None).tail(volatility_window).dropna()
+        )
         volatility = float(daily_returns.std()) if len(daily_returns) > 1 else 0.0
         recent_close = close.tail(volatility_window)
         running_max = recent_close.cummax()
@@ -139,7 +157,9 @@ def compute_recent_risk_metrics(history: pd.DataFrame, volatility_window: int = 
     if metrics.empty:
         return pd.DataFrame(columns=RISK_METRIC_COLUMNS)
 
-    metrics["overheat_return"] = metrics[["recent_return_5", "recent_return_10"]].max(axis=1)
+    metrics["overheat_return"] = metrics[["recent_return_5", "recent_return_10"]].max(
+        axis=1
+    )
     metrics["volatility_20_rank"] = metrics["volatility_20"].rank(pct=True)
     metrics["overheat_rank"] = metrics["overheat_return"].rank(pct=True)
     metrics["drawdown_rank"] = metrics["max_drawdown_20"].rank(pct=True)
@@ -161,14 +181,25 @@ def annotate_scores_with_risk(
     annotated["stock_id"] = normalize_stock_codes(annotated["stock_id"])
     if "stock_prefix" not in annotated.columns:
         annotated["stock_prefix"] = annotated["stock_id"].str[:3]
-    annotated = annotated.merge(metrics, on="stock_id", how="left", suffixes=("", "_risk"))
+    annotated = annotated.merge(
+        metrics, on="stock_id", how="left", suffixes=("", "_risk")
+    )
     if "stock_prefix_risk" in annotated.columns:
         annotated = annotated.drop(columns=["stock_prefix_risk"])
-    annotated["stock_prefix"] = annotated["stock_prefix"].fillna(annotated["stock_id"].str[:3])
+    annotated["stock_prefix"] = annotated["stock_prefix"].fillna(
+        annotated["stock_id"].str[:3]
+    )
 
-    rank_columns = ["volatility_20_rank", "overheat_rank", "drawdown_rank", "risk_score"]
+    rank_columns = [
+        "volatility_20_rank",
+        "overheat_rank",
+        "drawdown_rank",
+        "risk_score",
+    ]
     for column in rank_columns:
-        annotated[column] = pd.to_numeric(annotated[column], errors="coerce").fillna(0.5)
+        annotated[column] = pd.to_numeric(annotated[column], errors="coerce").fillna(
+            0.5
+        )
 
     raw_columns = [
         "recent_return_5",
@@ -179,7 +210,9 @@ def annotate_scores_with_risk(
         "overheat_return",
     ]
     for column in raw_columns:
-        annotated[column] = pd.to_numeric(annotated[column], errors="coerce").fillna(0.0)
+        annotated[column] = pd.to_numeric(annotated[column], errors="coerce").fillna(
+            0.0
+        )
     return annotated
 
 
@@ -195,7 +228,9 @@ def select_predictions(
     strategy = normalize_selection_strategy(strategy)
     top_k, total_exposure = validate_submission_controls(top_k, total_exposure)
     if pool_size < top_k:
-        raise ValueError(f"BDC_STAGE2_POOL_SIZE must be >= {top_k}, current: {pool_size}")
+        raise ValueError(
+            f"BDC_STAGE2_POOL_SIZE must be >= {top_k}, current: {pool_size}"
+        )
 
     ranked = scores.sort_values("rank").reset_index(drop=True).copy()
     if len(ranked) < top_k:
@@ -215,7 +250,9 @@ def select_predictions(
         selected = annotated.head(top_k).copy()
     elif strategy == LOW_VOL_THEN_RANK_TOP5:
         pool = annotated.head(effective_pool_size).copy()
-        annotated.loc[annotated["rank"].le(effective_pool_size), "stage2_pool_member"] = True
+        annotated.loc[
+            annotated["rank"].le(effective_pool_size), "stage2_pool_member"
+        ] = True
         selected = pool.sort_values(["volatility_20_rank", "rank"]).head(top_k).copy()
     else:
         raise ValueError(f"Unsupported selection strategy: {strategy}")
@@ -228,7 +265,9 @@ def select_predictions(
     annotated["stage2_selection_rank"] = annotated["stock_id"].map(rank_map)
 
     selected = annotated[annotated["selected"]].copy()
-    selected = selected.sort_values(["stage2_selection_rank", "rank"]).reset_index(drop=True)
+    selected = selected.sort_values(["stage2_selection_rank", "rank"]).reset_index(
+        drop=True
+    )
     return selected, annotated
 
 
@@ -257,15 +296,27 @@ def build_ensemble_scores(score_frames: list[tuple[str, pd.DataFrame]]) -> pd.Da
             }
         )
         rank_columns.append(f"rank_{label}")
-        combined = partial if combined is None else combined.merge(partial, on="stock_id", how="outer")
+        combined = (
+            partial
+            if combined is None
+            else combined.merge(partial, on="stock_id", how="outer")
+        )
 
     assert combined is not None
     combined["stock_prefix"] = combined["stock_id"].str[:3]
     combined["model_count"] = len(score_frames)
-    combined["top5_vote_count"] = sum(combined[column].le(5).fillna(False).astype(int) for column in rank_columns)
-    combined["top20_vote_count"] = sum(combined[column].le(20).fillna(False).astype(int) for column in rank_columns)
-    combined["top5_borda"] = sum((6 - combined[column]).clip(lower=0).fillna(0) for column in rank_columns)
-    combined["top20_borda"] = sum((21 - combined[column]).clip(lower=0).fillna(0) for column in rank_columns)
+    combined["top5_vote_count"] = sum(
+        combined[column].le(5).fillna(False).astype(int) for column in rank_columns
+    )
+    combined["top20_vote_count"] = sum(
+        combined[column].le(20).fillna(False).astype(int) for column in rank_columns
+    )
+    combined["top5_borda"] = sum(
+        (6 - combined[column]).clip(lower=0).fillna(0) for column in rank_columns
+    )
+    combined["top20_borda"] = sum(
+        (21 - combined[column]).clip(lower=0).fillna(0) for column in rank_columns
+    )
     combined["avg_rank_fill"] = combined[rank_columns].fillna(9999).mean(axis=1)
     combined["min_rank_fill"] = combined[rank_columns].fillna(9999).min(axis=1)
     combined["ensemble_score"] = (
@@ -295,7 +346,9 @@ def select_ensemble_predictions(
     combined = build_ensemble_scores(score_frames)
     candidates = combined[combined["top5_vote_count"] > 0].copy()
     if len(candidates) < top_k:
-        raise ValueError(f"ensemble top5 union candidates不足 {top_k} 只，当前仅有 {len(candidates)} 只")
+        raise ValueError(
+            f"ensemble top5 union candidates不足 {top_k} 只，当前仅有 {len(candidates)} 只"
+        )
 
     candidates = annotate_scores_with_risk(
         candidates,
@@ -303,9 +356,25 @@ def select_ensemble_predictions(
         volatility_window=volatility_window,
     )
     if strategy == ENSEMBLE_AVG_RANK_TOP5:
-        selected = candidates.sort_values(["avg_rank_fill", "min_rank_fill"]).head(top_k).copy()
+        selected = (
+            candidates.sort_values(["avg_rank_fill", "min_rank_fill"])
+            .head(top_k)
+            .copy()
+        )
     elif strategy == ENSEMBLE_LOW_VOL_TOP5:
-        selected = candidates.sort_values(["volatility_20_rank", "avg_rank_fill", "min_rank_fill"]).head(top_k).copy()
+        selected = (
+            candidates.sort_values(
+                ["volatility_20_rank", "avg_rank_fill", "min_rank_fill"]
+            )
+            .head(top_k)
+            .copy()
+        )
+    elif strategy == ENSEMBLE_LOW_OVERHEAT_TOP5:
+        selected = (
+            candidates.sort_values(["overheat_rank", "avg_rank_fill", "min_rank_fill"])
+            .head(top_k)
+            .copy()
+        )
     else:
         raise ValueError(f"Unsupported ensemble selection strategy: {strategy}")
 
@@ -335,5 +404,7 @@ def select_ensemble_predictions(
     )
 
     selected = annotated[annotated["selected"]].copy()
-    selected = selected.sort_values(["stage2_selection_rank", "ensemble_rank_before_stage2"]).reset_index(drop=True)
+    selected = selected.sort_values(
+        ["stage2_selection_rank", "ensemble_rank_before_stage2"]
+    ).reset_index(drop=True)
     return selected, annotated

@@ -57,6 +57,7 @@ PROFILE_DESCRIPTIONS = {
     "noid-full": "noid + 完整训练数据，用于测试取消训练目标日和每日股票抽样后的效果。",
     "noid-lowvol": "noid + 低波动二阶段后处理，用于测试候选池低波动优先是否改善 top5。",
     "ensemble-lowvol": "复用 noid 与 rank-replace 模型，测试两模型 top5 并集低波动重排。",
+    "ensemble-lowoverheat": "复用 rank-replace 与 LightGBM 模型，测试两模型 top5 并集低过热重排。",
     "smooth": "Lookahead 优化器对照档，用于测试优化器抗震荡效果。",
     "stable": "更强正则化对照档，保留 instrument 输入。",
     "large": "慢速候选复核档，较大前馈层和更多层数。",

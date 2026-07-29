@@ -77,6 +77,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
 | `noid-lowvol` | 去编号+低波动后处理 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, low-vol selection | 30 |
 | `ensemble-lowvol` | 两模型 top5 并集+低波动重排 | 3 | 复用源模型 | 复用源模型 | 不训练 | 不训练 | noid + rank-replace | 不训练 |
+| `ensemble-lowoverheat` | rank-replace + LGBM top5 并集+低过热重排 | 24 | 复用源模型 | 复用源模型 | 不训练 | 不训练 | rank-replace + LGBM | 不训练 |
 | `smooth` | Lookahead 对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, optimizer=lookahead | 15 |
 | `stable` | 正则化对照 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 15 |
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
@@ -129,6 +130,8 @@ sh tune.sh quick --skip-final --resume
 `noid-lowvol` 是 `noid` 的预测后处理对照：训练配置与 `noid` 相同，但预测时设置 `BDC_SELECTION_STRATEGY=low_vol_then_rank_top5`，先取模型分数前 `BDC_STAGE2_POOL_SIZE=10` 只作为候选池，再按最近 20 个交易日历史波动率从低到高选回 5 只。它不会改变模型训练，只用于验证低波动二阶段过滤是否真的有用。
 
 `ensemble-lowvol` 不训练新模型，默认通过 `BDC_ENSEMBLE_SOURCES=v1.2.13,v1.3.2` 复用两个已有实验的窗口模型。每个源模型先各自输出 top5，再取两者 top5 并集，最后在并集内按最近 20 个交易日历史波动率从低到高选 5 只。它验证的是 `v1.3.7` 诊断中的“两模型 top5 并集低波动重排”，不是 `v1.3.8` 的单模型 top10 低波动策略。
+
+`ensemble-lowoverheat` 不训练新模型，默认通过 `BDC_ENSEMBLE_SOURCES=v1.4.5,v1.12.0` 复用 rank-replace Transformer 与 LightGBM。每个源模型先各自输出 top5，再取两者 top5 并集，最后按最近 5/10 日收益过热程度从低到高选回 5 只。它针对的是 `v1.12.0` 的现象：LGBM 在 rank-replace 低分窗口里有防守价值，但不能牺牲高分窗口的进攻收益。`v1.12.1` 24 窗口实际均值约 `0.014789`，低于 `rank-replace`，但最差窗口改善；因此它只是防守候选，不是默认提交主线。
 
 `smooth` 不是新模型，只是 `balanced` 的优化器对照：默认 `BDC_OPTIMIZER=lookahead`、`BDC_LOOKAHEAD_K=5`、`BDC_LOOKAHEAD_ALPHA=0.5`。它用于判断 Lookahead 是否能降低分数震荡和改善最差窗口。
 
@@ -185,6 +188,7 @@ sh tune.sh v1.11.1 noid-rank-marketenv --windows 6 --skip-final
 sh tune.sh v1.11.2 noid-rank-marketenv-lite --windows 6 --skip-final
 sh tune.sh v1.11.3 noid-rank-marketenv-roll --windows 6 --skip-final
 sh tune.sh v1.12.0 noid-rank-lgbm --windows 6 --skip-final
+sh tune.sh v1.12.1 ensemble-lowoverheat --windows 24 --skip-final
 sh tune.sh v1.7.0 noid-rank-momdelta --windows 6 --skip-final
 sh tune.sh v1.8.0 noid-rank-riskadj --windows 6 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final

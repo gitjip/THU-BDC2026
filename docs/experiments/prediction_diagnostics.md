@@ -230,6 +230,34 @@ experiments/analysis/validation_v1.4.1_vs_v1.4.2_vs_v1.4.3/
 
 当前判断：第一版 LGBM 不适合直接替代默认 top5 提交模型，但它说明树模型可能在 broader ranking 上有补充价值。下一步若继续，应优先做 `LGBMRanker` 或候选池并集诊断，而不是马上改 `train.sh/test.sh`。
 
+24 窗口补跑后，这个判断更明确：
+
+- `v1.12.0` 均值约 `0.009367`，低于 `v1.4.5` 的 `0.017557`；
+- LGBM 在 `14/24` 个窗口胜出，但输掉 Transformer 高分窗口时差距很大；
+- 当 `v1.4.5` 得分低于 0 时，LGBM 基本都能略好一些；
+- 因此问题不是“LGBM 是否更强”，而是“能否识别需要防守的窗口或从两个 top5 并集中筛掉短期过热坏股”。
+
+`v1.4.5 + v1.12.0` 的候选池诊断显示：
+
+- `top5_union_equal` 均值约 `0.013572`，不如 `v1.4.5`；
+- `avg_rank_top5`、`min_rank_top5`、`borda_top20_top5` 都不通过；
+- `low_overheat_then_rank_top5` 均值约 `0.025834`，最差约 `-0.060607`，正分 `19/24`。
+
+这个规则已经接入为 `v1.12.1 ensemble-lowoverheat`，用于 walk-forward 复现：
+
+```bash
+sh tune.sh v1.12.1 ensemble-lowoverheat --windows 24 --skip-final
+```
+
+实际 walk-forward 复现结果：
+
+- `v1.12.1 ensemble-lowoverheat`：均值约 `0.014789`，最差约 `-0.052577`，正分 `16/24`；
+- 它低于 `v1.4.5 rank-replace` 的均值 `0.017557`，但最差窗口好于 `v1.4.5` 的 `-0.066987`；
+- top20/top50 后验收益和真实 top5 进入 top20 的命中数也好于 `v1.4.5`；
+- 它没有保住 Transformer 高分窗口，说明固定低过热重排仍会牺牲进攻收益。
+
+结论：这条规则不能作为默认提交策略，但验证了“LightGBM 是防守候选池”的判断。下一步若继续，应研究可用历史信号做模型选择门控，而不是继续固定从并集里重排。
+
 按早期新增 6 窗口和近期 12 窗口拆开看：
 
 - 早期 6 窗口均值：noid 约 `-0.025805`，rank-replace 约 `0.013438`，ensemble 约 `-0.007014`；
