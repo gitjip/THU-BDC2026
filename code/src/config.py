@@ -28,6 +28,7 @@ sequence_length = _env_int("BDC_SEQUENCE_LENGTH", 30 if fast_dev_mode else 60)
 feature_num = os.environ.get("BDC_FEATURE_NUM", "39" if fast_dev_mode else "158+39")
 use_market_relative_features = _env_bool("BDC_USE_MARKET_RELATIVE_FEATURES", False)
 use_market_breadth_features = _env_bool("BDC_USE_MARKET_BREADTH_FEATURES", False)
+use_market_env_features = _env_bool("BDC_USE_MARKET_ENV_FEATURES", False)
 use_rank_momentum_features = _env_bool("BDC_USE_RANK_MOMENTUM_FEATURES", False)
 use_rank_riskadj_features = _env_bool("BDC_USE_RANK_RISKADJ_FEATURES", False)
 use_ret5_rank_features = _env_bool("BDC_USE_RET5_RANK_FEATURES", False)
@@ -103,6 +104,8 @@ if use_market_relative_features:
     feature_dir_label = f"{feature_dir_label}_mktrel"
 if use_market_breadth_features:
     feature_dir_label = f"{feature_dir_label}_breadth"
+if use_market_env_features:
+    feature_dir_label = f"{feature_dir_label}_marketenv"
 if use_rank_momentum_features:
     feature_dir_label = f"{feature_dir_label}_rankmom"
 if use_rank_riskadj_features:
@@ -164,6 +167,7 @@ config = {
     "use_instrument_feature": _env_bool("BDC_USE_INSTRUMENT_FEATURE", True),
     "use_market_relative_features": use_market_relative_features,
     "use_market_breadth_features": use_market_breadth_features,
+    "use_market_env_features": use_market_env_features,
     "use_rank_momentum_features": use_rank_momentum_features,
     "use_rank_riskadj_features": use_rank_riskadj_features,
     "use_ret5_rank_features": use_ret5_rank_features,

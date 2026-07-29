@@ -199,7 +199,42 @@ mkt_breadth_5 = daily_breadth 的过去 5 个交易日滚动均值
 
 当前结论：`mkt_breadth_5` 单列当前实现未通过，不扩 12/24 窗口；市场环境方向不永久否定，但下一次必须换成更贴近横截面排序的表达。
 
-## 8. 短中期动量 rank 差（未通过）
+## 8. 市场环境状态特征（当前 5 列实现未通过）
+
+`v1.11.1 noid-rank-marketenv` 继续回到当前主候选 `noid-rank-replace`，但不再做“个股减市场均值”的强干预，也不只放一个 `mkt_breadth_5`。本轮只追加 5 个同日全股票共享的市场状态特征：
+
+- `market_return_mean`：当日全市场 `return_1` 均值；
+- `market_return_std`：当日全市场 `return_1` 标准差；
+- `up_ratio`：当日上涨股票比例；
+- `market_volatility_mean`：当日全市场 `volatility_20` 均值；
+- `market_turnover_median`：当日全市场 `换手率` 中位数。
+
+它们的目的不是直接区分同一天哪只股票更好，而是让模型知道当前市场背景：普涨、普跌、震荡、高波动或流动性变化。同样的个股横截面 rank，在不同市场状态下可能有不同含义。
+
+和两个旧实验的区别：
+
+- 不同于 `noid-marketrel`：本轮不改写每只股票自己的收益、换手率和波动率，只追加市场整体状态；
+- 不同于 `noid-rank-breadth`：本轮不只看上涨比例差，而是同时给出收益均值、收益离散度、上涨比例、市场波动和换手率环境。
+
+它只使用当前日期及之前已经存在的历史数据，不看目标未来 5 天。默认先跑 6 窗口：
+
+```bash
+sh tune.sh v1.11.1 noid-rank-marketenv --windows 6 --skip-final
+```
+
+`v1.11.1 noid-rank-marketenv` 已跑 6 窗口，结果明显变差：
+
+- 6 窗口均值约 `-0.041127`；
+- 同日期 `v1.4.5 noid-rank-replace` 均值约 `0.018557`；
+- 平均差值约 `-0.059683`，`0/6` 个窗口胜过主对照；
+- 最差窗口约 `-0.145722`，弱于主对照的 `-0.066987`；
+- 平均 Spearman 约 `-0.073997`，略好于同日期主对照的 `-0.138490`，但 top20 后验收益约 `-0.016153`，弱于主对照的 `-0.010901`；
+- 真实 top5 落入模型 top20 的总命中数只有 `2`，低于主对照的 `5`；
+- 选股池明显改变，`000988`、`301308`、`300316`、`600522` 等股票反复进入 top5，其中高频股票平均后验收益偏弱。
+
+当前结论：这 5 个同日市场状态列直接追加的实现未通过，不扩 12/24 窗口。但这不直接否定市场环境方向。下一次如果继续，应拆成更小版本，例如只保留 `market_return_mean + up_ratio`，或改成过去 3/5 日滚动市场状态，避免一次把收益均值、离散度、波动和换手率环境全部交给模型。
+
+## 9. 短中期动量 rank 差（未通过）
 
 `v1.7.0 noid-rank-momdelta` 回到当前主候选 `noid-rank-replace`，只追加 1 个横截面动量变化特征：
 
@@ -231,7 +266,7 @@ ret5_rank_minus_ret20_rank = ret5_rank - ret20_rank
 
 当前结论：`ret5_rank_minus_ret20_rank` 当前实现未通过，不扩 12/24 窗口。横截面 rank 小信号方向不完全否定，但下一步应避免单纯追逐短期加速。
 
-## 9. 风险调整短期动量 rank 差（未通过）
+## 10. 风险调整短期动量 rank 差（未通过）
 
 `v1.8.0 noid-rank-riskadj` 仍回到当前主候选 `noid-rank-replace`，只追加 1 个横截面风险调整信号：
 
@@ -262,7 +297,7 @@ ret5_rank_minus_vol20_rank = ret5_rank - vol20_rank
 
 当前结论：`ret5_rank_minus_vol20_rank` 当前实现未通过，不建议扩 12/24 窗口。它比 `momdelta` 稍好，但仍没有接近主对照。
 
-## 10. return_5 单列横截面 rank（未通过）
+## 11. return_5 单列横截面 rank（未通过）
 
 `v1.9.0 noid-rank-ret5rank` 继续回到当前主候选 `noid-rank-replace`，只追加 1 个最小短期相对强弱信号：
 
@@ -297,7 +332,7 @@ sh tune.sh v1.9.0 noid-rank-ret5rank --windows 6 --skip-final
 
 当前结论：`return_5_cs_rank` 当前实现未通过，不扩 12/24 窗口。它比 `momdelta` 和 `riskadj` 都更差，说明问题不只是“rank 差值组合方式”，而是短期收益 rank 本身可能在这段数据里强化了近期过热或固定股票池。
 
-## 11. 短期过热保护信号（待验证）
+## 12. 短期过热保护信号（待验证）
 
 `v1.10.0 noid-rank-overheatguard` 继续回到当前主候选 `noid-rank-replace`，只追加 1 个来自离线差异分析的小信号：
 
@@ -336,7 +371,7 @@ sh tune.sh v1.10.0 noid-rank-overheatguard --windows 6 --skip-final
 
 当前结论：`short_overheat_guard` 当前实现未通过，不扩 12/24 窗口。它比单列 `return_5_cs_rank` 略好，但仍远低于主对照，说明把“高分坏股差异”直接作为训练输入，可能会让模型继续锁定同一批近期过热股票，而不是学会惩罚它们。后续不要继续堆短期 rank 派生列，除非改成预测后处理或独立的二阶段校准。
 
-## 12. 下一步特征方向
+## 13. 下一步特征方向
 
 优先级建议：
 
@@ -345,13 +380,14 @@ sh tune.sh v1.10.0 noid-rank-overheatguard --windows 6 --skip-final
 3. 暂停 `v1.9.0 noid-rank-ret5rank`，不要扩 12/24 窗口。
 4. 暂停 `v1.8.0 noid-rank-riskadj`，不要扩 12/24 窗口。
 5. 暂停 `v1.7.0 noid-rank-momdelta`，不要扩 12/24 窗口。
-6. 暂停 `v1.6.2 noid-rank-breadth` 单列市场宽度实现，不扩 12/24 窗口。
-7. 暂停 `v1.6.1 noid-rank-multiperiod`，不要继续扩跑。
-8. 暂停 `v1.6.0 noid-rank-cleanrisk`，不要继续扩跑。
-9. 暂停 `noid-rank-trendq`，除非先重新设计为更少、更正交的单个特征。
-10. 暂停第一版市场相对特征，不扩 12 窗口。
-11. 暂停继续拆 rank 替换组；不要简单扩大 rank 列表。
-12. 下一步更适合做预测后处理或二阶段校准，而不是继续向 Transformer 输入中追加短期 rank 派生列。
-13. 暂缓行业/板块特征，除非有可靠行业映射；用股票代码前缀硬猜行业容易引入伪规律。
+6. 暂停 `v1.11.1 noid-rank-marketenv` 当前 5 列直接追加实现，不扩 12/24；如果继续市场环境方向，应拆小或改滚动表达。
+7. 暂停 `v1.6.2 noid-rank-breadth` 单列市场宽度实现，不扩 12/24 窗口。
+8. 暂停 `v1.6.1 noid-rank-multiperiod`，不要继续扩跑。
+9. 暂停 `v1.6.0 noid-rank-cleanrisk`，不要继续扩跑。
+10. 暂停 `noid-rank-trendq`，除非先重新设计为更少、更正交的单个特征。
+11. 暂停第一版市场相对特征，不扩 12 窗口。
+12. 暂停继续拆 rank 替换组；不要简单扩大 rank 列表。
+13. 下一步更适合做预测后处理或二阶段校准，而不是继续向 Transformer 输入中追加短期 rank 派生列。
+14. 暂缓行业/板块特征，除非有可靠行业映射；用股票代码前缀硬猜行业容易引入伪规律。
 
 新增特征遵循 [实验纪律与分级验证](experiment_protocol.md)：优先单列小信号，先跑 6 窗口，接近主对照再扩到 12/24。弱于主对照的实验应停止扩跑，但结论写成“当前实现未通过”，避免过早否定整个方向。

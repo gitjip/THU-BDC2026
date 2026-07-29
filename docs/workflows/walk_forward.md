@@ -65,6 +65,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-rank-cleanrisk` | rank替代+清洗启发风险特征 | 3 | 39(no instrument, rank replace)+6 cleanrisk | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-multiperiod` | rank替代+多周期基础特征 | 3 | 39(no instrument, rank replace)+10 multiperiod | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-breadth` | rank替代+市场宽度 | 3 | 38(no instrument, rank replace)+1 breadth=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-marketenv` | rank替代+市场环境状态 | 6 | 38(no instrument, rank replace)+5 marketenv=43 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-momdelta` | rank替代+短中期动量rank差 | 6 | 38(no instrument, rank replace)+1 momdelta=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-riskadj` | rank替代+风险调整短期动量rank差 | 6 | 38(no instrument, rank replace)+1 riskadj=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-ret5rank` | rank替代+return_5单列rank | 6 | 38(no instrument, rank replace)+1 ret5rank=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
@@ -78,7 +79,7 @@ sh tune.sh quick --skip-final --resume
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-rank-breadth`、`noid-rank-momdelta`、`noid-rank-riskadj`、`noid-rank-ret5rank`、`noid-rank-overheatguard`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-rank-breadth`、`noid-rank-marketenv`、`noid-rank-momdelta`、`noid-rank-riskadj`、`noid-rank-ret5rank`、`noid-rank-overheatguard`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
 
 `noid` 源自 `balanced` 小模型配置，但当前属于主线对照档：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`，并使用 30 epoch 上限。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。如果要重新严格比较是否保留 `instrument`，应给 `balanced` 显式设置相同 epoch 上限。
 
@@ -101,6 +102,8 @@ sh tune.sh quick --skip-final --resume
 `noid-rank-multiperiod` 基于 `noid-rank-replace`，追加 10 个多周期基础特征：3/20/40 日收益、5/40 日波动率、3/10/40 日均线偏离和 3/20、10/40 量能比例。它用于测试更完整的短中期窗口是否能改善源模型排序信号。
 
 `noid-rank-breadth` 基于 `noid-rank-replace`，只追加 1 个市场宽度特征 `mkt_breadth_5`：当日上涨股票比例减下跌股票比例，再做过去 5 个交易日滚动均值。它用于测试市场环境是否能帮助模型理解同样的横截面强弱在不同市场状态下的含义。
+
+`noid-rank-marketenv` 基于 `noid-rank-replace`，追加 5 个当日市场环境状态特征：`market_return_mean`、`market_return_std`、`up_ratio`、`market_volatility_mean`、`market_turnover_median`。它不同于 `noid-marketrel` 的逐股相对市场强干预，也不同于单列 `mkt_breadth_5`；本轮目标是让模型知道当前是普涨、普跌、震荡、高波动还是流动性变化。`v1.11.1` 已跑 6 窗口且明显变差，不扩 12/24；但这只否定当前 5 列直接追加表达，不直接否定市场环境方向。
 
 `noid-rank-momdelta` 基于 `noid-rank-replace`，只追加 1 个短中期动量 rank 差信号 `ret5_rank_minus_ret20_rank`：当日 `return_5` 横截面百分位排名减去过去 20 日收益横截面百分位排名。它用于测试“短期相对强度是否高于中期相对强度”这类更贴近横截面排序的小信号，默认先跑 6 窗口。
 
@@ -169,6 +172,7 @@ sh tune.sh v1.4.9 noid-rank-trendq --windows 3 --skip-final
 sh tune.sh v1.6.0 noid-rank-cleanrisk --windows 3 --skip-final
 sh tune.sh v1.6.1 noid-rank-multiperiod --windows 3 --skip-final
 sh tune.sh v1.6.2 noid-rank-breadth --windows 3 --skip-final
+sh tune.sh v1.11.1 noid-rank-marketenv --windows 6 --skip-final
 sh tune.sh v1.7.0 noid-rank-momdelta --windows 6 --skip-final
 sh tune.sh v1.8.0 noid-rank-riskadj --windows 6 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final

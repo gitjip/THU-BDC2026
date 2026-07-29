@@ -13,6 +13,7 @@ from utils import engineer_features_39, engineer_features_158plus39
 from utils import create_ranking_dataset_vectorized
 from utils import apply_market_relative_features
 from utils import apply_market_breadth_features
+from utils import apply_market_env_features
 from utils import apply_trend_quality_features
 from utils import apply_cross_sectional_rank_features
 from utils import apply_rank_momentum_features
@@ -146,6 +147,18 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
             "%s: 已添加市场宽度特征 %s 个，输入特征=%s",
             desc,
             len(market_breadth_columns),
+            len(feature_columns),
+        )
+
+    if config.get('use_market_env_features', False):
+        processed, feature_columns, market_env_columns = apply_market_env_features(
+            processed,
+            feature_columns,
+        )
+        logger.info(
+            "%s: 已添加市场环境特征 %s 个，输入特征=%s",
+            desc,
+            len(market_env_columns),
             len(feature_columns),
         )
 

@@ -84,6 +84,14 @@ MARKET_BREADTH_FEATURE_COLUMNS = [
     'mkt_breadth_5',
 ]
 
+MARKET_ENV_FEATURE_COLUMNS = [
+    'market_return_mean',
+    'market_return_std',
+    'up_ratio',
+    'market_volatility_mean',
+    'market_turnover_median',
+]
+
 RANK_MOMENTUM_FEATURE_COLUMNS = [
     'ret5_rank_minus_ret20_rank',
 ]
@@ -305,6 +313,65 @@ def add_market_breadth_features(df):
 
 def apply_market_breadth_features(df, feature_columns):
     processed, added_columns = add_market_breadth_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
+
+
+def market_env_feature_names():
+    return list(MARKET_ENV_FEATURE_COLUMNS)
+
+
+def add_market_env_features(df):
+    """Add per-date market state features shared by all stocks on that date."""
+    required_columns = {'日期', 'return_1', 'volatility_20', '换手率'}
+    missing = required_columns - set(df.columns)
+    if missing:
+        return df.copy(), []
+
+    result = df.copy()
+    dates = pd.to_datetime(result['日期'], errors='coerce').dt.normalize()
+    return_1 = pd.to_numeric(result['return_1'], errors='coerce')
+    volatility_20 = pd.to_numeric(result['volatility_20'], errors='coerce')
+    turnover = pd.to_numeric(result['换手率'], errors='coerce')
+    valid = dates.notna()
+
+    if valid.any():
+        daily = pd.DataFrame(
+            {
+                '日期': dates[valid],
+                'return_1': return_1[valid],
+                'up': return_1[valid].gt(0).astype(float),
+                'volatility_20': volatility_20[valid],
+                'turnover': turnover[valid],
+            }
+        )
+        market = daily.groupby('日期', sort=True).agg(
+            market_return_mean=('return_1', 'mean'),
+            market_return_std=('return_1', 'std'),
+            up_ratio=('up', 'mean'),
+            market_volatility_mean=('volatility_20', 'mean'),
+            market_turnover_median=('turnover', 'median'),
+        )
+        for column in MARKET_ENV_FEATURE_COLUMNS:
+            result[column] = dates.map(market[column])
+    else:
+        for column in MARKET_ENV_FEATURE_COLUMNS:
+            result[column] = 0.0
+
+    for column in MARKET_ENV_FEATURE_COLUMNS:
+        result[column] = (
+            pd.to_numeric(result[column], errors='coerce')
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+    result['up_ratio'] = result['up_ratio'].clip(lower=0.0, upper=1.0)
+    return result, list(MARKET_ENV_FEATURE_COLUMNS)
+
+
+def apply_market_env_features(df, feature_columns):
+    processed, added_columns = add_market_env_features(df)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns
