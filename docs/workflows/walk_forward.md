@@ -60,6 +60,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-rank` | 去编号+横截面rank | 3 | 39(no instrument)+rank | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-lite` | 去编号+小范围rank替代 | 3 | 39(no instrument, 7 rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-replace` | 去编号+rank替代绝对量价 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-lgbm` | LightGBM 表格模型 | 6 | 38(no instrument, rank replace) | 45 | 120 | 不抽样 | LGBMRegressor, 300 trees | - |
 | `noid-rank-sharp` | rank替代+更尖锐listwise目标 | 3 | 39(no instrument, rank replace) | 45 | 60 | 120 | d_model=96, layers=2, target_temp=0.05 | 30 |
 | `noid-rank-trendq` | rank替代+趋势质量 | 3 | 39(no instrument, rank replace)+5 trendq | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-cleanrisk` | rank替代+清洗启发风险特征 | 3 | 39(no instrument, rank replace)+6 cleanrisk | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
@@ -81,7 +82,7 @@ sh tune.sh quick --skip-final --resume
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-rank-breadth`、`noid-rank-marketenv`、`noid-rank-marketenv-lite`、`noid-rank-marketenv-roll`、`noid-rank-momdelta`、`noid-rank-riskadj`、`noid-rank-ret5rank`、`noid-rank-overheatguard`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
+这些档位中，Transformer 档位默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-rank-breadth`、`noid-rank-marketenv`、`noid-rank-marketenv-lite`、`noid-rank-marketenv-roll`、`noid-rank-momdelta`、`noid-rank-riskadj`、`noid-rank-ret5rank`、`noid-rank-overheatguard`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`noid-rank-lgbm` 是 LightGBM 档位，没有 epoch/早停概念，使用固定树数量。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
 
 `noid` 源自 `balanced` 小模型配置，但当前属于主线对照档：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`，并使用 30 epoch 上限。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。如果要重新严格比较是否保留 `instrument`，应给 `balanced` 显式设置相同 epoch 上限。
 
@@ -110,6 +111,8 @@ sh tune.sh quick --skip-final --resume
 `noid-rank-marketenv-lite` 是 `noid-rank-marketenv` 的拆小版，只追加 `market_return_mean` 和 `up_ratio` 两列，先验证普涨/普跌背景本身是否有用。`v1.11.2` 已跑 6 窗口，均值仍明显低于同日期 `rank-replace`；这个 profile 保留用于复现，不建议扩 12/24。后续若继续市场环境方向，应另做滚动/滞后市场状态。
 
 `noid-rank-marketenv-roll` 继续拆小市场环境方向，只追加 `mkt_ret_mean_5_lag1` 和 `mkt_up_ratio_5_lag1` 两列：先计算每日市场收益均值和上涨比例，再滞后 1 个交易日并取过去 5 个交易日均值。`v1.11.3` 已跑 6 窗口，仍明显弱于同日期 `rank-replace`；这个 profile 保留用于复现，不建议扩 12/24。
+
+`noid-rank-lgbm` 是第一版 LightGBM 表格模型候选。它复用当前 `rank-replace` 特征工程，但不构造 Transformer 序列，改为每个 `股票-日期` 一行，直接回归未来 5 日收益并按预测分数排序。第一版使用 120 个训练目标日和全股票训练，目的是快速判断树模型方向是否值得继续；正式提交默认仍不使用它。`v1.12.0` 6 窗口 top5 均值低于 `rank-replace`，但训练很快且 top20/top50 诊断略好，后续更适合试 `LGBMRanker` 或候选池集成。
 
 `noid-rank-momdelta` 基于 `noid-rank-replace`，只追加 1 个短中期动量 rank 差信号 `ret5_rank_minus_ret20_rank`：当日 `return_5` 横截面百分位排名减去过去 20 日收益横截面百分位排名。它用于测试“短期相对强度是否高于中期相对强度”这类更贴近横截面排序的小信号，默认先跑 6 窗口。
 
@@ -181,6 +184,7 @@ sh tune.sh v1.6.2 noid-rank-breadth --windows 3 --skip-final
 sh tune.sh v1.11.1 noid-rank-marketenv --windows 6 --skip-final
 sh tune.sh v1.11.2 noid-rank-marketenv-lite --windows 6 --skip-final
 sh tune.sh v1.11.3 noid-rank-marketenv-roll --windows 6 --skip-final
+sh tune.sh v1.12.0 noid-rank-lgbm --windows 6 --skip-final
 sh tune.sh v1.7.0 noid-rank-momdelta --windows 6 --skip-final
 sh tune.sh v1.8.0 noid-rank-riskadj --windows 6 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final

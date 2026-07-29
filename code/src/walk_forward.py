@@ -13,10 +13,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from data_utils import get_trading_dates, load_stock_data, normalize_stock_codes, setup_logging
-from diagnose_predictions import diagnose_prediction_scores, write_experiment_prediction_diagnostics
+from data_utils import (
+    get_trading_dates,
+    load_stock_data,
+    normalize_stock_codes,
+    setup_logging,
+)
+from diagnose_predictions import (
+    diagnose_prediction_scores,
+    write_experiment_prediction_diagnostics,
+)
 from stage2_selection import select_ensemble_predictions
-
 
 SEMVER_PATTERN = re.compile(r"^v\d+\.\d+\.\d+$")
 DEFAULT_VERSION = "v1.0.0"
@@ -32,6 +39,7 @@ PROFILE_DESCRIPTIONS = {
     "noid-rank": "noid + 横截面 rank 特征，用于测试当日相对强弱特征。",
     "noid-rank-lite": "noid + 小范围横截面 rank 替代，只替换最确定的原始价量尺度列。",
     "noid-rank-replace": "noid + 横截面 rank 替代绝对量价尺度特征，用于测试更少重复噪声的 rank 方案。",
+    "noid-rank-lgbm": "LightGBM 表格回归模型，使用 noid + 横截面 rank 替代特征。",
     "noid-rank-sharp": "noid + rank 替代 + 更尖锐的 listwise 目标分布，用于测试训练监督信号是否过弱。",
     "noid-rank-trendq": "noid + 横截面 rank 替代 + 趋势质量特征，用于测试上涨质量信号。",
     "noid-rank-cleanrisk": "noid + 横截面 rank 替代 + 流动性/无成交/回撤风险特征，用于测试清洗启发的风险信号。",
@@ -57,6 +65,7 @@ PROFILE_DESCRIPTIONS = {
 
 NOTE_CONFIG_KEYS = [
     "BDC_TUNE_PROFILE",
+    "BDC_MODEL_KIND",
     "BDC_FEATURE_NUM",
     "BDC_SEQUENCE_LENGTH",
     "BDC_TRAIN_TARGET_DAYS",
@@ -92,6 +101,15 @@ NOTE_CONFIG_KEYS = [
     "BDC_OPTIMIZER",
     "BDC_LR_SCHEDULER",
     "BDC_EARLY_STOPPING_PATIENCE",
+    "BDC_LGBM_N_ESTIMATORS",
+    "BDC_LGBM_LEARNING_RATE",
+    "BDC_LGBM_NUM_LEAVES",
+    "BDC_LGBM_MIN_CHILD_SAMPLES",
+    "BDC_LGBM_SUBSAMPLE",
+    "BDC_LGBM_COLSAMPLE_BYTREE",
+    "BDC_LGBM_REG_ALPHA",
+    "BDC_LGBM_REG_LAMBDA",
+    "BDC_LGBM_NUM_THREADS",
 ]
 
 RESUME_IGNORED_TUNE_ENV_KEYS = {
@@ -187,34 +205,77 @@ def parse_args() -> argparse.Namespace:
     fast_dev = parse_bool_env("BDC_FAST_DEV", False)
     default_windows = parse_int_env("BDC_WF_WINDOWS", 2 if fast_dev else 3)
 
-    parser = argparse.ArgumentParser(description="按语义版本运行多窗口 walk-forward 调参流程")
+    parser = argparse.ArgumentParser(
+        description="按语义版本运行多窗口 walk-forward 调参流程"
+    )
     parser.add_argument(
         "version",
         nargs="?",
         default=read_default_version(),
         help="实验语义版本号，例如 v1.3.10；默认读取 VERSION",
     )
-    parser.add_argument("--windows", type=int, default=default_windows, help="walk-forward 窗口数量")
-    parser.add_argument("--target-days", type=int, default=parse_int_env("BDC_WF_TARGET_DAYS", 5), help="每个窗口验证的连续交易日数量")
-    parser.add_argument("--step-days", type=int, default=parse_int_env("BDC_WF_STEP_DAYS", 5), help="相邻窗口向前滚动的交易日步长")
-    parser.add_argument("--data-file", default=os.environ.get("BDC_STOCK_DATA_FILE"), help="可选数据文件；默认按项目数据规则自动寻找")
-    parser.add_argument("--skip-final", action="store_true", help="只跑 walk-forward，不训练最终模型")
-    parser.add_argument("--publish-final", action="store_true", help="把最终预测复制到 output/result.csv；默认只保存在 experiments 下")
-    parser.add_argument("--create-tag", action="store_true", help="流程成功后创建同名本地 Git tag；要求工作区无未提交改动")
-    parser.add_argument("--resume", action="store_true", help="复用已有版本目录中已完成的窗口")
-    parser.add_argument("--rerun-predictions", action="store_true", help="配合 --resume 时强制重跑预测和评分，不重训已有模型")
-    parser.add_argument("--reuse-models-from", help="复用另一个实验目录的已训练模型，只重跑当前版本预测和评分")
-    parser.add_argument("--dry-run", action="store_true", help="只打印窗口计划，不执行训练、预测和打分")
+    parser.add_argument(
+        "--windows", type=int, default=default_windows, help="walk-forward 窗口数量"
+    )
+    parser.add_argument(
+        "--target-days",
+        type=int,
+        default=parse_int_env("BDC_WF_TARGET_DAYS", 5),
+        help="每个窗口验证的连续交易日数量",
+    )
+    parser.add_argument(
+        "--step-days",
+        type=int,
+        default=parse_int_env("BDC_WF_STEP_DAYS", 5),
+        help="相邻窗口向前滚动的交易日步长",
+    )
+    parser.add_argument(
+        "--data-file",
+        default=os.environ.get("BDC_STOCK_DATA_FILE"),
+        help="可选数据文件；默认按项目数据规则自动寻找",
+    )
+    parser.add_argument(
+        "--skip-final", action="store_true", help="只跑 walk-forward，不训练最终模型"
+    )
+    parser.add_argument(
+        "--publish-final",
+        action="store_true",
+        help="把最终预测复制到 output/result.csv；默认只保存在 experiments 下",
+    )
+    parser.add_argument(
+        "--create-tag",
+        action="store_true",
+        help="流程成功后创建同名本地 Git tag；要求工作区无未提交改动",
+    )
+    parser.add_argument(
+        "--resume", action="store_true", help="复用已有版本目录中已完成的窗口"
+    )
+    parser.add_argument(
+        "--rerun-predictions",
+        action="store_true",
+        help="配合 --resume 时强制重跑预测和评分，不重训已有模型",
+    )
+    parser.add_argument(
+        "--reuse-models-from",
+        help="复用另一个实验目录的已训练模型，只重跑当前版本预测和评分",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="只打印窗口计划，不执行训练、预测和打分"
+    )
     return parser.parse_args()
 
 
 def validate_args(args: argparse.Namespace) -> None:
     if not SEMVER_PATTERN.fullmatch(args.version):
-        raise ValueError(f"版本号必须是 vMAJOR.MINOR.PATCH 格式（各段可为多位数字），例如 v1.3.10。当前: {args.version}")
+        raise ValueError(
+            f"版本号必须是 vMAJOR.MINOR.PATCH 格式（各段可为多位数字），例如 v1.3.10。当前: {args.version}"
+        )
     if args.windows <= 0:
         raise ValueError("--windows 必须大于 0")
     if args.target_days != 5:
-        raise ValueError("当前比赛提交窗口固定为连续 5 个交易日，请保持 --target-days 5")
+        raise ValueError(
+            "当前比赛提交窗口固定为连续 5 个交易日，请保持 --target-days 5"
+        )
     if args.step_days <= 0:
         raise ValueError("--step-days 必须大于 0")
 
@@ -243,7 +304,9 @@ def get_git_info() -> dict:
 def create_git_tag(version: str) -> None:
     git_info = get_git_info()
     if git_info["status_short"]:
-        raise ValueError("创建 Git tag 前请先提交当前代码改动，确保 tag 能准确对应代码版本")
+        raise ValueError(
+            "创建 Git tag 前请先提交当前代码改动，确保 tag 能准确对应代码版本"
+        )
 
     existing = subprocess.run(
         ["git", "tag", "--list", version],
@@ -255,7 +318,9 @@ def create_git_tag(version: str) -> None:
     if existing:
         raise ValueError(f"Git tag 已存在: {version}")
 
-    subprocess.run(["git", "tag", "-a", version, "-m", version], cwd=REPO_ROOT, check=True)
+    subprocess.run(
+        ["git", "tag", "-a", version, "-m", version], cwd=REPO_ROOT, check=True
+    )
     logger.info("已创建本地 Git tag: %s", version)
 
 
@@ -275,7 +340,9 @@ def is_consecutive_trading_dates(
         return False
 
     target_positions = [positions[date] for date in target_date_list]
-    expected_positions = list(range(target_positions[0], target_positions[0] + len(target_positions)))
+    expected_positions = list(
+        range(target_positions[0], target_positions[0] + len(target_positions))
+    )
     return target_positions == expected_positions
 
 
@@ -287,7 +354,9 @@ def is_consecutive_calendar_dates(target_dates: pd.DatetimeIndex | list[str]) ->
     return normalized.equals(expected)
 
 
-def build_window_metadata(window: WalkForwardWindow, trading_dates: pd.DatetimeIndex) -> dict:
+def build_window_metadata(
+    window: WalkForwardWindow, trading_dates: pd.DatetimeIndex
+) -> dict:
     target_dates = format_date_list(window.target_dates)
     first_day = pd.Timestamp(target_dates[0])
     last_day = pd.Timestamp(target_dates[-1])
@@ -299,12 +368,16 @@ def build_window_metadata(window: WalkForwardWindow, trading_dates: pd.DatetimeI
         "target_trading_day_count": len(target_dates),
         "target_calendar_span_days": calendar_span_days,
         "is_consecutive_calendar_days": is_consecutive_calendar_dates(target_dates),
-        "is_consecutive_trading_days": is_consecutive_trading_dates(trading_dates, target_dates),
+        "is_consecutive_trading_days": is_consecutive_trading_dates(
+            trading_dates, target_dates
+        ),
         "date_note": "验证窗口要求连续自然日，并且这些自然日都必须在数据中有交易记录；周末或节假日窗口会被跳过。",
     }
 
 
-def build_windows(dates: pd.DatetimeIndex, window_count: int, target_days: int, step_days: int) -> list[WalkForwardWindow]:
+def build_windows(
+    dates: pd.DatetimeIndex, window_count: int, target_days: int, step_days: int
+) -> list[WalkForwardWindow]:
     candidates: list[tuple[int, int, pd.DatetimeIndex]] = []
     for target_start_idx in range(1, len(dates) - target_days + 1):
         target_end_idx = target_start_idx + target_days - 1
@@ -322,17 +395,24 @@ def build_windows(dates: pd.DatetimeIndex, window_count: int, target_days: int, 
     last_selected_end_idx: int | None = None
 
     for target_start_idx, target_end_idx, target_dates in reversed(candidates):
-        if last_selected_end_idx is not None and target_end_idx > last_selected_end_idx - step_days:
+        if (
+            last_selected_end_idx is not None
+            and target_end_idx > last_selected_end_idx - step_days
+        ):
             continue
 
         as_of_idx = target_start_idx - 1
         window = WalkForwardWindow(
             name=f"window_{len(windows) + 1:02d}",
             as_of_date=pd.Timestamp(dates[as_of_idx]).strftime("%Y-%m-%d"),
-            mock_submission_date=(pd.Timestamp(target_dates[0]) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+            mock_submission_date=(
+                pd.Timestamp(target_dates[0]) - pd.Timedelta(days=1)
+            ).strftime("%Y-%m-%d"),
             target_start_date=pd.Timestamp(target_dates[0]).strftime("%Y-%m-%d"),
             target_end_date=pd.Timestamp(target_dates[-1]).strftime("%Y-%m-%d"),
-            target_dates=[pd.Timestamp(day).strftime("%Y-%m-%d") for day in target_dates],
+            target_dates=[
+                pd.Timestamp(day).strftime("%Y-%m-%d") for day in target_dates
+            ],
         )
         windows.append(window)
         last_selected_end_idx = target_end_idx
@@ -356,13 +436,17 @@ def prepare_experiment_dir(experiment_dir: Path, resume: bool, dry_run: bool) ->
     if dry_run:
         return
     if experiment_dir.exists() and any(experiment_dir.iterdir()) and not resume:
-        raise FileExistsError(f"版本目录已存在: {experiment_dir}。如需继续旧任务，请加 --resume")
+        raise FileExistsError(
+            f"版本目录已存在: {experiment_dir}。如需继续旧任务，请加 --resume"
+        )
     experiment_dir.mkdir(parents=True, exist_ok=True)
 
 
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def read_json(path: Path) -> dict:
@@ -416,7 +500,26 @@ def source_tune_env(source_experiment_dir: Path) -> dict[str, str]:
     return env
 
 
-def source_window_model_dir(source_experiment_dir: Path | None, window: WalkForwardWindow) -> Path | None:
+def current_model_kind(env: dict[str, str] | None = None) -> str:
+    value = (env or os.environ).get("BDC_MODEL_KIND", "transformer").strip().lower()
+    if value in {"", "torch"}:
+        return "transformer"
+    if value not in {"transformer", "lgbm"}:
+        raise ValueError(f"Unsupported BDC_MODEL_KIND: {value}")
+    return value
+
+
+def experiment_model_kind(experiment_dir: Path | None) -> str:
+    if experiment_dir is None:
+        return current_model_kind()
+    manifest = read_json(experiment_dir / "manifest.json")
+    tune_env = manifest.get("tune_env") or {}
+    return current_model_kind(tune_env)
+
+
+def source_window_model_dir(
+    source_experiment_dir: Path | None, window: WalkForwardWindow
+) -> Path | None:
     if source_experiment_dir is None:
         return None
     source_window_dir = source_experiment_dir / "windows" / window.name
@@ -424,27 +527,59 @@ def source_window_model_dir(source_experiment_dir: Path | None, window: WalkForw
     source_window = metadata.get("window") or {}
     if source_window:
         source_target_dates = format_date_list(source_window.get("target_dates") or [])
-        if source_window.get("as_of_date") != window.as_of_date or source_target_dates != format_date_list(window.target_dates):
+        if source_window.get(
+            "as_of_date"
+        ) != window.as_of_date or source_target_dates != format_date_list(
+            window.target_dates
+        ):
             raise ValueError(
                 f"{source_window_dir} 的窗口日期与当前 {window.name} 不一致，不能复用模型"
             )
 
     model_dir = source_window_dir / "model"
-    if not model_artifacts_exist(model_dir):
-        raise FileNotFoundError(f"复用模型缺少 best_model.pth 或 scaler.pkl: {model_dir}")
+    model_kind = experiment_model_kind(source_experiment_dir)
+    if not model_artifacts_exist(model_dir, model_kind=model_kind):
+        raise FileNotFoundError(
+            f"复用模型缺少 {model_artifact_description(model_kind)}: {model_dir}"
+        )
     return model_dir
 
 
-def model_artifacts_exist(model_dir: Path) -> bool:
-    return (model_dir / "best_model.pth").exists() and (model_dir / "scaler.pkl").exists()
+def model_artifact_description(model_kind: str | None = None) -> str:
+    model_kind = (
+        current_model_kind({"BDC_MODEL_KIND": model_kind})
+        if model_kind
+        else current_model_kind()
+    )
+    if model_kind == "lgbm":
+        return "model.pkl 和 features.json"
+    return "best_model.pth 和 scaler.pkl"
+
+
+def model_artifacts_exist(model_dir: Path, model_kind: str | None = None) -> bool:
+    model_kind = (
+        current_model_kind({"BDC_MODEL_KIND": model_kind})
+        if model_kind
+        else current_model_kind()
+    )
+    if model_kind == "lgbm":
+        return (model_dir / "model.pkl").exists() and (
+            model_dir / "features.json"
+        ).exists()
+    return (model_dir / "best_model.pth").exists() and (
+        model_dir / "scaler.pkl"
+    ).exists()
 
 
 def source_final_model_dir(source_experiment_dir: Path | None) -> Path | None:
     if source_experiment_dir is None:
         return None
     model_dir = source_experiment_dir / "final" / "model"
-    if not model_artifacts_exist(model_dir):
-        raise FileNotFoundError(f"复用最终模型缺少 best_model.pth 或 scaler.pkl: {model_dir}")
+    model_kind = experiment_model_kind(source_experiment_dir)
+    if not model_artifacts_exist(model_dir, model_kind=model_kind):
+        raise FileNotFoundError(
+            f"复用最终模型缺少 {model_artifact_description(model_kind)}: {model_dir}"
+        )
     return model_dir
 
 
@@ -480,7 +615,9 @@ def normalize_resume_env_value(key: str, value) -> str:
 
 def resume_tune_env(tune_env: dict) -> dict[str, str]:
     keys = set(tune_env) - RESUME_IGNORED_TUNE_ENV_KEYS
-    return {key: normalize_resume_env_value(key, tune_env.get(key)) for key in sorted(keys)}
+    return {
+        key: normalize_resume_env_value(key, tune_env.get(key)) for key in sorted(keys)
+    }
 
 
 def window_identity(window: WalkForwardWindow | dict) -> dict[str, str | list[str]]:
@@ -493,11 +630,15 @@ def window_identity(window: WalkForwardWindow | dict) -> dict[str, str | list[st
     return {
         "name": str(window.get("name") or ""),
         "as_of_date": str(window.get("as_of_date") or ""),
-        "target_dates": format_date_list(window.get("target_dates") or window.get("target_trading_dates") or []),
+        "target_dates": format_date_list(
+            window.get("target_dates") or window.get("target_trading_dates") or []
+        ),
     }
 
 
-def window_date_identity(window: WalkForwardWindow | dict) -> dict[str, str | list[str]]:
+def window_date_identity(
+    window: WalkForwardWindow | dict,
+) -> dict[str, str | list[str]]:
     identity = window_identity(window)
     return {
         "as_of_date": identity["as_of_date"],
@@ -515,13 +656,17 @@ def row_identity_key(row: dict) -> str:
     target_dates = str(row.get("target_dates") or "")
     if not as_of_date or not target_dates:
         return ""
-    parsed_target_dates = [item.strip() for item in target_dates.split(",") if item.strip()]
+    parsed_target_dates = [
+        item.strip() for item in target_dates.split(",") if item.strip()
+    ]
     if not parsed_target_dates:
         return ""
     return f"{as_of_date}__{','.join(parsed_target_dates)}"
 
 
-def existing_summary_row(existing_summary: dict[str, dict], window: WalkForwardWindow) -> dict | None:
+def existing_summary_row(
+    existing_summary: dict[str, dict], window: WalkForwardWindow
+) -> dict | None:
     date_row = existing_summary.get(f"date:{window_identity_key(window)}")
     if date_row:
         return date_row
@@ -536,14 +681,20 @@ def existing_summary_row(existing_summary: dict[str, dict], window: WalkForwardW
 def build_data_signature(full_df: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
     return {
         "row_count": int(len(full_df)),
-        "stock_count": int(full_df["股票代码"].nunique()) if "股票代码" in full_df.columns else None,
+        "stock_count": (
+            int(full_df["股票代码"].nunique())
+            if "股票代码" in full_df.columns
+            else None
+        ),
         "trading_day_count": int(len(dates)),
         "start_date": pd.Timestamp(dates[0]).strftime("%Y-%m-%d") if len(dates) else "",
         "end_date": pd.Timestamp(dates[-1]).strftime("%Y-%m-%d") if len(dates) else "",
     }
 
 
-def validate_existing_window_row(window: WalkForwardWindow, existing_row: dict | None) -> None:
+def validate_existing_window_row(
+    window: WalkForwardWindow, existing_row: dict | None
+) -> None:
     if not existing_row:
         return
 
@@ -555,7 +706,9 @@ def validate_existing_window_row(window: WalkForwardWindow, existing_row: dict |
             f"as_of 旧={row_as_of}, 新={window.as_of_date}。请换版本号或清理旧窗口后重跑。"
         )
     if row_target_dates:
-        parsed_target_dates = [item.strip() for item in row_target_dates.split(",") if item.strip()]
+        parsed_target_dates = [
+            item.strip() for item in row_target_dates.split(",") if item.strip()
+        ]
         if parsed_target_dates != format_date_list(window.target_dates):
             raise ValueError(
                 f"{window.name} 的 summary.csv 目标日期与当前窗口不一致: "
@@ -574,7 +727,9 @@ def validate_resume_window(
     if not requires_existing_metadata:
         return
     if not previous_metadata:
-        raise ValueError(f"{window_dir} 缺少 metadata.json，不能安全 --resume。请换版本号或清理旧窗口后重跑。")
+        raise ValueError(
+            f"{window_dir} 缺少 metadata.json，不能安全 --resume。请换版本号或清理旧窗口后重跑。"
+        )
 
     previous_window = previous_metadata.get("window") or {}
     if window_date_identity(previous_window) != window_date_identity(window):
@@ -584,12 +739,16 @@ def validate_resume_window(
         )
 
 
-def normalize_resume_window_dirs(experiment_dir: Path, windows: list[WalkForwardWindow]) -> None:
+def normalize_resume_window_dirs(
+    experiment_dir: Path, windows: list[WalkForwardWindow]
+) -> None:
     windows_dir = experiment_dir / "windows"
     if not windows_dir.exists():
         return
 
-    desired_name_by_key = {window_identity_key(window): window.name for window in windows}
+    desired_name_by_key = {
+        window_identity_key(window): window.name for window in windows
+    }
     existing_dir_by_key = {}
     for child in sorted(windows_dir.iterdir()):
         if not child.is_dir() or not child.name.startswith("window_"):
@@ -618,7 +777,9 @@ def normalize_resume_window_dirs(experiment_dir: Path, windows: list[WalkForward
     source_dirs = {source_dir.resolve() for source_dir, _ in moves}
     for _, target_dir in moves:
         if target_dir.exists() and target_dir.resolve() not in source_dirs:
-            raise ValueError(f"无法重排窗口目录，目标目录已存在且不属于可移动旧窗口: {target_dir}")
+            raise ValueError(
+                f"无法重排窗口目录，目标目录已存在且不属于可移动旧窗口: {target_dir}"
+            )
 
     temp_dir = windows_dir / ".resume_reindex_tmp"
     if temp_dir.exists():
@@ -646,7 +807,9 @@ def validate_resume_experiment(
 ) -> None:
     if not previous_manifest:
         if experiment_dir.exists() and any(experiment_dir.iterdir()):
-            raise ValueError(f"{experiment_dir} 已有内容但缺少 manifest.json，不能安全 --resume。请换版本号或清理目录。")
+            raise ValueError(
+                f"{experiment_dir} 已有内容但缺少 manifest.json，不能安全 --resume。请换版本号或清理目录。"
+            )
         return
 
     previous_signature = previous_manifest.get("data_signature")
@@ -656,8 +819,12 @@ def validate_resume_experiment(
             f"旧={previous_signature}, 新={data_signature}。请换版本号重新跑。"
         )
 
-    previous_windows = [window_date_identity(item) for item in previous_manifest.get("windows") or []]
-    previous_window_keys = {window_identity_key(item) for item in previous_manifest.get("windows") or []}
+    previous_windows = [
+        window_date_identity(item) for item in previous_manifest.get("windows") or []
+    ]
+    previous_window_keys = {
+        window_identity_key(item) for item in previous_manifest.get("windows") or []
+    }
     current_window_keys = {window_identity_key(window) for window in windows}
     if previous_windows and previous_window_keys - current_window_keys:
         missing = [
@@ -676,13 +843,16 @@ def validate_resume_experiment(
     mismatches = [
         f"{key}: 旧={previous_env.get(key, '')}, 新={current_env.get(key, '')}"
         for key in keys
-        if normalize_resume_env_value(key, previous_env.get(key)) != normalize_resume_env_value(key, current_env.get(key))
+        if normalize_resume_env_value(key, previous_env.get(key))
+        != normalize_resume_env_value(key, current_env.get(key))
     ]
     if mismatches:
         detail = "; ".join(mismatches[:8])
         if len(mismatches) > 8:
             detail = f"{detail}; ..."
-        raise ValueError(f"当前调参配置与旧 manifest 不一致，不能安全 --resume。{detail}。请换版本号重新跑。")
+        raise ValueError(
+            f"当前调参配置与旧 manifest 不一致，不能安全 --resume。{detail}。请换版本号重新跑。"
+        )
 
 
 def optional_float(value) -> float | None:
@@ -693,7 +863,9 @@ def optional_float(value) -> float | None:
     return float(value)
 
 
-def stage_total_seconds(*values: float | None, fallback: float | None = None) -> float | None:
+def stage_total_seconds(
+    *values: float | None, fallback: float | None = None
+) -> float | None:
     if values and all(value is not None for value in values):
         return float(sum(value for value in values if value is not None))
     if fallback is not None:
@@ -733,7 +905,9 @@ def run_logged(command: list[str], env: dict[str, str], log_path: Path) -> float
     return duration
 
 
-def make_child_env(model_dir: Path, stock_data_file: Path, env_overrides: dict[str, str] | None = None) -> dict[str, str]:
+def make_child_env(
+    model_dir: Path, stock_data_file: Path, env_overrides: dict[str, str] | None = None
+) -> dict[str, str]:
     env = os.environ.copy()
     if env_overrides:
         env.update(env_overrides)
@@ -747,6 +921,7 @@ def make_child_env(model_dir: Path, stock_data_file: Path, env_overrides: dict[s
 def get_tune_env_snapshot() -> dict[str, str | None]:
     keys = [
         "BDC_TUNE_PROFILE",
+        "BDC_MODEL_KIND",
         "BDC_FAST_DEV",
         "BDC_WF_WINDOWS",
         "BDC_FEATURE_NUM",
@@ -800,11 +975,22 @@ def get_tune_env_snapshot() -> dict[str, str | None]:
         "BDC_NUM_PROCESSES",
         "BDC_TORCH_NUM_THREADS",
         "BDC_TENSORBOARD",
+        "BDC_LGBM_N_ESTIMATORS",
+        "BDC_LGBM_LEARNING_RATE",
+        "BDC_LGBM_NUM_LEAVES",
+        "BDC_LGBM_MIN_CHILD_SAMPLES",
+        "BDC_LGBM_SUBSAMPLE",
+        "BDC_LGBM_COLSAMPLE_BYTREE",
+        "BDC_LGBM_REG_ALPHA",
+        "BDC_LGBM_REG_LAMBDA",
+        "BDC_LGBM_NUM_THREADS",
     ]
     return {key: os.environ.get(key) for key in keys if os.environ.get(key) is not None}
 
 
-def get_walk_forward_args_snapshot(args: argparse.Namespace, generated_window_count: int) -> dict:
+def get_walk_forward_args_snapshot(
+    args: argparse.Namespace, generated_window_count: int
+) -> dict:
     return {
         "requested_windows": args.windows,
         "generated_windows": generated_window_count,
@@ -823,7 +1009,12 @@ def get_walk_forward_args_snapshot(args: argparse.Namespace, generated_window_co
 
 def run_train(model_dir: Path, stock_data_file: Path, log_path: Path) -> float:
     env = make_child_env(model_dir=model_dir, stock_data_file=stock_data_file)
-    return run_logged([sys.executable, "code/src/train.py"], env=env, log_path=log_path)
+    train_script = (
+        "code/src/train_lgbm.py"
+        if current_model_kind(env) == "lgbm"
+        else "code/src/train.py"
+    )
+    return run_logged([sys.executable, train_script], env=env, log_path=log_path)
 
 
 def run_predict(
@@ -837,12 +1028,28 @@ def run_predict(
     env_overrides: dict[str, str] | None = None,
     selection_strategy: str | None = None,
 ) -> float:
-    env = make_child_env(model_dir=model_dir, stock_data_file=stock_data_file, env_overrides=env_overrides)
-    command = [sys.executable, "code/src/predict.py", "--output", str(result_path)]
+    env = make_child_env(
+        model_dir=model_dir,
+        stock_data_file=stock_data_file,
+        env_overrides=env_overrides,
+    )
+    predict_script = (
+        "code/src/predict_lgbm.py"
+        if current_model_kind(env) == "lgbm"
+        else "code/src/predict.py"
+    )
+    command = [sys.executable, predict_script, "--output", str(result_path)]
     if scores_path:
         command.extend(["--scores-output", str(scores_path)])
     if submission_date:
-        command.extend(["--submission-date", submission_date, "--as-of-date", as_of_date or submission_date])
+        command.extend(
+            [
+                "--submission-date",
+                submission_date,
+                "--as-of-date",
+                as_of_date or submission_date,
+            ]
+        )
     if target_start_date:
         command.extend(["--target-start-date", target_start_date])
     if selection_strategy:
@@ -852,12 +1059,24 @@ def run_predict(
 
 def normalize_prediction(prediction_path: Path) -> pd.DataFrame:
     prediction = pd.read_csv(prediction_path, dtype={"stock_id": str, "股票代码": str})
-    id_col = "stock_id" if "stock_id" in prediction.columns else "股票代码" if "股票代码" in prediction.columns else None
-    weight_col = "weight" if "weight" in prediction.columns else "权重" if "权重" in prediction.columns else None
+    id_col = (
+        "stock_id"
+        if "stock_id" in prediction.columns
+        else "股票代码" if "股票代码" in prediction.columns else None
+    )
+    weight_col = (
+        "weight"
+        if "weight" in prediction.columns
+        else "权重" if "权重" in prediction.columns else None
+    )
     if id_col is None or weight_col is None:
-        raise ValueError(f"{prediction_path} 缺少 stock_id/股票代码 或 weight/权重 字段")
+        raise ValueError(
+            f"{prediction_path} 缺少 stock_id/股票代码 或 weight/权重 字段"
+        )
 
-    prediction = prediction.rename(columns={id_col: "stock_id", weight_col: "weight"})[["stock_id", "weight"]].copy()
+    prediction = prediction.rename(columns={id_col: "stock_id", weight_col: "weight"})[
+        ["stock_id", "weight"]
+    ].copy()
     prediction["stock_id"] = normalize_stock_codes(prediction["stock_id"])
     prediction["weight"] = pd.to_numeric(prediction["weight"], errors="coerce")
 
@@ -867,30 +1086,44 @@ def normalize_prediction(prediction_path: Path) -> pd.DataFrame:
         raise ValueError(f"{prediction_path} 最多只能包含 5 只股票")
     weight_sum = float(prediction["weight"].sum())
     if weight_sum < 0 or weight_sum > 1.0:
-        raise ValueError(f"{prediction_path} 权重和必须在 0 到 1 之间，当前为 {weight_sum}")
+        raise ValueError(
+            f"{prediction_path} 权重和必须在 0 到 1 之间，当前为 {weight_sum}"
+        )
     return prediction
 
 
-def calculate_window_score(full_df: pd.DataFrame, prediction_path: Path, target_dates: list[str]) -> dict:
+def calculate_window_score(
+    full_df: pd.DataFrame, prediction_path: Path, target_dates: list[str]
+) -> dict:
     prediction = normalize_prediction(prediction_path)
     target_index = pd.DatetimeIndex(pd.to_datetime(target_dates).normalize())
     first_day = target_index[0]
     last_day = target_index[-1]
 
     window_data = full_df[full_df["日期"].isin(target_index)].copy()
-    first_open = window_data[window_data["日期"] == first_day][["股票代码", "开盘"]].rename(columns={"开盘": "start_open"})
-    last_open = window_data[window_data["日期"] == last_day][["股票代码", "开盘"]].rename(columns={"开盘": "end_open"})
+    first_open = window_data[window_data["日期"] == first_day][
+        ["股票代码", "开盘"]
+    ].rename(columns={"开盘": "start_open"})
+    last_open = window_data[window_data["日期"] == last_day][
+        ["股票代码", "开盘"]
+    ].rename(columns={"开盘": "end_open"})
     returns = first_open.merge(last_open, on="股票代码", how="inner")
-    returns["return"] = (returns["end_open"] - returns["start_open"]) / (returns["start_open"] + 1e-12)
+    returns["return"] = (returns["end_open"] - returns["start_open"]) / (
+        returns["start_open"] + 1e-12
+    )
 
-    selected = prediction.merge(returns, left_on="stock_id", right_on="股票代码", how="left")
+    selected = prediction.merge(
+        returns, left_on="stock_id", right_on="股票代码", how="left"
+    )
     if selected["return"].isna().any():
         missing = selected.loc[selected["return"].isna(), "stock_id"].tolist()
         raise ValueError(f"目标窗口首尾交易日缺少这些预测股票的数据: {missing}")
 
     selected["weighted_return"] = selected["return"] * selected["weight"]
     score = float(selected["weighted_return"].sum())
-    oracle_equal_weight_top5 = float(returns["return"].nlargest(5).mean()) if len(returns) >= 5 else 0.0
+    oracle_equal_weight_top5 = (
+        float(returns["return"].nlargest(5).mean()) if len(returns) >= 5 else 0.0
+    )
     market_equal_weight = float(returns["return"].mean()) if len(returns) else 0.0
 
     return {
@@ -910,12 +1143,16 @@ def calculate_window_score(full_df: pd.DataFrame, prediction_path: Path, target_
                 "return": float(row.return_),
                 "weighted_return": float(row.weighted_return),
             }
-            for row in selected.rename(columns={"return": "return_"}).itertuples(index=False)
+            for row in selected.rename(columns={"return": "return_"}).itertuples(
+                index=False
+            )
         ],
     }
 
 
-def write_window_data(full_df: pd.DataFrame, window: WalkForwardWindow, window_dir: Path) -> tuple[Path, Path]:
+def write_window_data(
+    full_df: pd.DataFrame, window: WalkForwardWindow, window_dir: Path
+) -> tuple[Path, Path]:
     data_dir = window_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     as_of = pd.Timestamp(window.as_of_date)
@@ -940,7 +1177,11 @@ def read_prediction_scores_csv(path: Path) -> pd.DataFrame:
     frame["stock_id"] = normalize_stock_codes(frame["stock_id"])
     frame["rank"] = pd.to_numeric(frame["rank"], errors="coerce")
     frame["pred_score"] = pd.to_numeric(frame["pred_score"], errors="coerce")
-    frame = frame.dropna(subset=["rank", "stock_id"]).sort_values("rank").reset_index(drop=True)
+    frame = (
+        frame.dropna(subset=["rank", "stock_id"])
+        .sort_values("rank")
+        .reset_index(drop=True)
+    )
     frame["rank"] = frame["rank"].astype(int)
     return frame
 
@@ -953,8 +1194,7 @@ def write_ensemble_prediction(
 ) -> dict:
     history = pd.read_csv(train_data_path, dtype={"股票代码": str})
     score_frames = [
-        (label, read_prediction_scores_csv(path))
-        for label, path in score_paths
+        (label, read_prediction_scores_csv(path)) for label, path in score_paths
     ]
     strategy = os.environ.get("BDC_SELECTION_STRATEGY", "ensemble_low_vol_top5")
     selected, scores = select_ensemble_predictions(
@@ -1007,17 +1247,30 @@ def run_window(
     reused_model_dir = source_window_model_dir(source_experiment_dir, window)
     active_model_dir = reused_model_dir or model_dir
     window_start_time = time.perf_counter()
-    train_seconds = optional_float(existing_row.get("train_seconds")) if existing_row else None
-    predict_seconds = optional_float(existing_row.get("predict_seconds")) if existing_row else None
-    existing_window_seconds = optional_float(existing_row.get("window_seconds")) if existing_row else None
+    train_seconds = (
+        optional_float(existing_row.get("train_seconds")) if existing_row else None
+    )
+    predict_seconds = (
+        optional_float(existing_row.get("predict_seconds")) if existing_row else None
+    )
+    existing_window_seconds = (
+        optional_float(existing_row.get("window_seconds")) if existing_row else None
+    )
 
     log_section(
         f"{window.name} | as_of={window.as_of_date} | target={window.target_start_date} ~ {window.target_end_date}"
     )
 
     previous_metadata = read_json(metadata_path) if resume else {}
-    will_skip_local_model = resume and reused_model_dir is None and model_artifacts_exist(model_dir)
-    will_skip_prediction = resume and not rerun_predictions and prediction_path.exists() and prediction_scores_path.exists()
+    will_skip_local_model = (
+        resume and reused_model_dir is None and model_artifacts_exist(model_dir)
+    )
+    will_skip_prediction = (
+        resume
+        and not rerun_predictions
+        and prediction_path.exists()
+        and prediction_scores_path.exists()
+    )
     validate_resume_window(
         window_dir=window_dir,
         window=window,
@@ -1033,28 +1286,45 @@ def run_window(
         "train_data": str(train_data_path.relative_to(REPO_ROOT)),
         "target_data": str(target_data_path.relative_to(REPO_ROOT)),
         "model_dir": display_path(active_model_dir),
-        "reused_model_dir": display_path(reused_model_dir) if reused_model_dir else None,
+        "reused_model_dir": (
+            display_path(reused_model_dir) if reused_model_dir else None
+        ),
         "prediction": str(prediction_path.relative_to(REPO_ROOT)),
         "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
-        "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
-        "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
+        "prediction_diagnostics": str(
+            prediction_diagnostics_path.relative_to(REPO_ROOT)
+        ),
+        "prediction_diagnostics_summary": str(
+            prediction_diagnostics_summary_path.relative_to(REPO_ROOT)
+        ),
         "score": str(score_path.relative_to(REPO_ROOT)),
     }
     write_json(metadata_path, window_metadata)
 
     if reused_model_dir:
-        logger.info("%s 复用模型，跳过训练: %s", window.name, display_path(reused_model_dir))
+        logger.info(
+            "%s 复用模型，跳过训练: %s", window.name, display_path(reused_model_dir)
+        )
         train_seconds = 0.0
     elif will_skip_local_model:
         logger.info("%s 已有模型，跳过训练", window.name)
     else:
         logger.info("%s 训练: as_of=%s", window.name, window.as_of_date)
-        train_seconds = run_train(model_dir=model_dir, stock_data_file=train_data_path, log_path=window_dir / "logs" / "train_command.log")
+        train_seconds = run_train(
+            model_dir=model_dir,
+            stock_data_file=train_data_path,
+            log_path=window_dir / "logs" / "train_command.log",
+        )
 
     if will_skip_prediction:
         logger.info("%s 已有预测结果，跳过预测", window.name)
     else:
-        logger.info("%s 预测: 目标窗口=%s ~ %s", window.name, window.target_start_date, window.target_end_date)
+        logger.info(
+            "%s 预测: 目标窗口=%s ~ %s",
+            window.name,
+            window.target_start_date,
+            window.target_end_date,
+        )
         predict_seconds = run_predict(
             model_dir=active_model_dir,
             stock_data_file=train_data_path,
@@ -1077,7 +1347,11 @@ def run_window(
     window_seconds = stage_total_seconds(
         train_seconds,
         predict_seconds,
-        fallback=existing_window_seconds if existing_window_seconds is not None else elapsed_seconds,
+        fallback=(
+            existing_window_seconds
+            if existing_window_seconds is not None
+            else elapsed_seconds
+        ),
     )
     score["train_seconds"] = train_seconds
     score["train_duration"] = format_duration(train_seconds)
@@ -1086,7 +1360,12 @@ def run_window(
     score["window_seconds"] = window_seconds
     score["window_duration"] = format_duration(window_seconds)
     write_json(score_path, score)
-    logger.info("%s 验证得分: %.6f | 总耗时=%s", window.name, score["score"], format_duration(window_seconds))
+    logger.info(
+        "%s 验证得分: %.6f | 总耗时=%s",
+        window.name,
+        score["score"],
+        format_duration(window_seconds),
+    )
 
     return {
         "version": version,
@@ -1100,7 +1379,9 @@ def run_window(
         "target_trading_day_count": score["target_trading_day_count"],
         "target_calendar_span_days": score["target_calendar_span_days"],
         "is_consecutive_calendar_days": score["is_consecutive_calendar_days"],
-        "is_consecutive_trading_days": is_consecutive_trading_dates(trading_dates, window.target_dates),
+        "is_consecutive_trading_days": is_consecutive_trading_dates(
+            trading_dates, window.target_dates
+        ),
         "score": score["score"],
         "oracle_equal_weight_top5": score["oracle_equal_weight_top5"],
         "market_equal_weight": score["market_equal_weight"],
@@ -1114,12 +1395,24 @@ def run_window(
         "reused_model_dir": display_path(reused_model_dir) if reused_model_dir else "",
         "prediction": str(prediction_path.relative_to(REPO_ROOT)),
         "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
-        "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
-        "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
-        "pred_score_target_return_spearman": diagnostics.get("spearman_pred_score_target_return"),
-        "pred_top5_equal_weight_return": diagnostics.get("pred_top5_equal_weight_return"),
-        "pred_top20_equal_weight_return": diagnostics.get("pred_top20_equal_weight_return"),
-        "actual_top5_hits_in_pred_top20": diagnostics.get("actual_top5_hits_in_pred_top20"),
+        "prediction_diagnostics": str(
+            prediction_diagnostics_path.relative_to(REPO_ROOT)
+        ),
+        "prediction_diagnostics_summary": str(
+            prediction_diagnostics_summary_path.relative_to(REPO_ROOT)
+        ),
+        "pred_score_target_return_spearman": diagnostics.get(
+            "spearman_pred_score_target_return"
+        ),
+        "pred_top5_equal_weight_return": diagnostics.get(
+            "pred_top5_equal_weight_return"
+        ),
+        "pred_top20_equal_weight_return": diagnostics.get(
+            "pred_top20_equal_weight_return"
+        ),
+        "actual_top5_hits_in_pred_top20": diagnostics.get(
+            "actual_top5_hits_in_pred_top20"
+        ),
         "score_file": str(score_path.relative_to(REPO_ROOT)),
     }
 
@@ -1143,8 +1436,12 @@ def run_ensemble_window(
     score_path = window_dir / "score.json"
     metadata_path = window_dir / "metadata.json"
     window_start_time = time.perf_counter()
-    predict_seconds = optional_float(existing_row.get("predict_seconds")) if existing_row else None
-    existing_window_seconds = optional_float(existing_row.get("window_seconds")) if existing_row else None
+    predict_seconds = (
+        optional_float(existing_row.get("predict_seconds")) if existing_row else None
+    )
+    existing_window_seconds = (
+        optional_float(existing_row.get("window_seconds")) if existing_row else None
+    )
 
     log_section(
         f"{window.name} | ensemble | as_of={window.as_of_date} | target={window.target_start_date} ~ {window.target_end_date}"
@@ -1204,15 +1501,18 @@ def run_ensemble_window(
         "ensemble_sources": source_entries,
         "prediction": str(prediction_path.relative_to(REPO_ROOT)),
         "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
-        "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
-        "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
+        "prediction_diagnostics": str(
+            prediction_diagnostics_path.relative_to(REPO_ROOT)
+        ),
+        "prediction_diagnostics_summary": str(
+            prediction_diagnostics_summary_path.relative_to(REPO_ROOT)
+        ),
         "score": str(score_path.relative_to(REPO_ROOT)),
     }
     write_json(metadata_path, window_metadata)
 
     should_predict_sources = not (
-        will_skip_prediction
-        and all(path.exists() for _, path in source_score_paths)
+        will_skip_prediction and all(path.exists() for _, path in source_score_paths)
     )
     if should_predict_sources:
         total_predict_seconds = 0.0
@@ -1253,7 +1553,11 @@ def run_ensemble_window(
     window_seconds = stage_total_seconds(
         0.0,
         predict_seconds,
-        fallback=existing_window_seconds if existing_window_seconds is not None else elapsed_seconds,
+        fallback=(
+            existing_window_seconds
+            if existing_window_seconds is not None
+            else elapsed_seconds
+        ),
     )
     score["train_seconds"] = 0.0
     score["train_duration"] = format_duration(0.0)
@@ -1262,7 +1566,12 @@ def run_ensemble_window(
     score["window_seconds"] = window_seconds
     score["window_duration"] = format_duration(window_seconds)
     write_json(score_path, score)
-    logger.info("%s ensemble 验证得分: %.6f | 总耗时=%s", window.name, score["score"], format_duration(window_seconds))
+    logger.info(
+        "%s ensemble 验证得分: %.6f | 总耗时=%s",
+        window.name,
+        score["score"],
+        format_duration(window_seconds),
+    )
 
     return {
         "version": version,
@@ -1276,7 +1585,9 @@ def run_ensemble_window(
         "target_trading_day_count": score["target_trading_day_count"],
         "target_calendar_span_days": score["target_calendar_span_days"],
         "is_consecutive_calendar_days": score["is_consecutive_calendar_days"],
-        "is_consecutive_trading_days": is_consecutive_trading_dates(trading_dates, window.target_dates),
+        "is_consecutive_trading_days": is_consecutive_trading_dates(
+            trading_dates, window.target_dates
+        ),
         "score": score["score"],
         "oracle_equal_weight_top5": score["oracle_equal_weight_top5"],
         "market_equal_weight": score["market_equal_weight"],
@@ -1287,15 +1598,29 @@ def run_ensemble_window(
         "window_seconds": window_seconds,
         "window_duration": format_duration(window_seconds),
         "model_dir": "ensemble",
-        "reused_model_dir": ",".join(display_path(path) for path in source_experiment_dirs),
+        "reused_model_dir": ",".join(
+            display_path(path) for path in source_experiment_dirs
+        ),
         "prediction": str(prediction_path.relative_to(REPO_ROOT)),
         "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
-        "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
-        "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
-        "pred_score_target_return_spearman": diagnostics.get("spearman_pred_score_target_return"),
-        "pred_top5_equal_weight_return": diagnostics.get("pred_top5_equal_weight_return"),
-        "pred_top20_equal_weight_return": diagnostics.get("pred_top20_equal_weight_return"),
-        "actual_top5_hits_in_pred_top20": diagnostics.get("actual_top5_hits_in_pred_top20"),
+        "prediction_diagnostics": str(
+            prediction_diagnostics_path.relative_to(REPO_ROOT)
+        ),
+        "prediction_diagnostics_summary": str(
+            prediction_diagnostics_summary_path.relative_to(REPO_ROOT)
+        ),
+        "pred_score_target_return_spearman": diagnostics.get(
+            "spearman_pred_score_target_return"
+        ),
+        "pred_top5_equal_weight_return": diagnostics.get(
+            "pred_top5_equal_weight_return"
+        ),
+        "pred_top20_equal_weight_return": diagnostics.get(
+            "pred_top20_equal_weight_return"
+        ),
+        "actual_top5_hits_in_pred_top20": diagnostics.get(
+            "actual_top5_hits_in_pred_top20"
+        ),
         "score_file": str(score_path.relative_to(REPO_ROOT)),
     }
 
@@ -1316,9 +1641,17 @@ def run_final(
     reused_model_dir = source_final_model_dir(source_experiment_dir)
     active_model_dir = reused_model_dir or model_dir
     final_start_time = time.perf_counter()
-    train_seconds = optional_float(existing_final.get("train_seconds")) if existing_final else None
-    predict_seconds = optional_float(existing_final.get("predict_seconds")) if existing_final else None
-    existing_total_seconds = optional_float(existing_final.get("total_seconds")) if existing_final else None
+    train_seconds = (
+        optional_float(existing_final.get("train_seconds")) if existing_final else None
+    )
+    predict_seconds = (
+        optional_float(existing_final.get("predict_seconds"))
+        if existing_final
+        else None
+    )
+    existing_total_seconds = (
+        optional_float(existing_final.get("total_seconds")) if existing_final else None
+    )
 
     log_section("最终模型训练与预测")
 
@@ -1329,9 +1662,18 @@ def run_final(
         logger.info("最终模型已存在，跳过训练")
     else:
         logger.info("训练最终模型: %s", model_dir)
-        train_seconds = run_train(model_dir=model_dir, stock_data_file=full_data_file, log_path=final_dir / "logs" / "train_command.log")
+        train_seconds = run_train(
+            model_dir=model_dir,
+            stock_data_file=full_data_file,
+            log_path=final_dir / "logs" / "train_command.log",
+        )
 
-    if resume and not rerun_predictions and result_path.exists() and result_scores_path.exists():
+    if (
+        resume
+        and not rerun_predictions
+        and result_path.exists()
+        and result_scores_path.exists()
+    ):
         logger.info("最终预测已存在，跳过预测")
     else:
         logger.info("生成最终预测: %s", result_path)
@@ -1354,7 +1696,11 @@ def run_final(
     final_seconds = stage_total_seconds(
         train_seconds,
         predict_seconds,
-        fallback=existing_total_seconds if existing_total_seconds is not None else elapsed_seconds,
+        fallback=(
+            existing_total_seconds
+            if existing_total_seconds is not None
+            else elapsed_seconds
+        ),
     )
     logger.info("最终流程完成: 耗时=%s", format_duration(final_seconds))
 
@@ -1386,8 +1732,14 @@ def run_final_ensemble(
     result_path = final_dir / "result.csv"
     result_scores_path = final_dir / "result_scores.csv"
     final_start_time = time.perf_counter()
-    predict_seconds = optional_float(existing_final.get("predict_seconds")) if existing_final else None
-    existing_total_seconds = optional_float(existing_final.get("total_seconds")) if existing_final else None
+    predict_seconds = (
+        optional_float(existing_final.get("predict_seconds"))
+        if existing_final
+        else None
+    )
+    existing_total_seconds = (
+        optional_float(existing_final.get("total_seconds")) if existing_final else None
+    )
 
     log_section("最终 ensemble 预测")
 
@@ -1463,12 +1815,18 @@ def run_final_ensemble(
     final_seconds = stage_total_seconds(
         0.0,
         predict_seconds,
-        fallback=existing_total_seconds if existing_total_seconds is not None else elapsed_seconds,
+        fallback=(
+            existing_total_seconds
+            if existing_total_seconds is not None
+            else elapsed_seconds
+        ),
     )
     logger.info("最终 ensemble 流程完成: 耗时=%s", format_duration(final_seconds))
     return {
         "model_dir": "ensemble",
-        "reused_model_dir": ",".join(display_path(path) for path in source_experiment_dirs),
+        "reused_model_dir": ",".join(
+            display_path(path) for path in source_experiment_dirs
+        ),
         "ensemble_sources": source_entries,
         "prediction": str(result_path.relative_to(REPO_ROOT)),
         "prediction_scores": str(result_scores_path.relative_to(REPO_ROOT)),
@@ -1540,7 +1898,9 @@ def write_experiment_note(experiment_dir: Path, manifest: dict) -> None:
             ]
         )
         for row in rows:
-            target = f"{row.get('target_start_date', '')} ~ {row.get('target_end_date', '')}"
+            target = (
+                f"{row.get('target_start_date', '')} ~ {row.get('target_end_date', '')}"
+            )
             lines.append(
                 "| {window} | {target} | {score} | {train} | {predict} |".format(
                     window=row.get("window", ""),
@@ -1558,15 +1918,21 @@ def write_experiment_note(experiment_dir: Path, manifest: dict) -> None:
     lines.extend(["", "## 预测诊断", ""])
     if prediction_diagnostics:
         lines.append(f"- summary: `{prediction_diagnostics.get('summary_csv', '')}`")
-        lines.append(f"- repeated stocks: `{prediction_diagnostics.get('repeated_stocks_csv', '')}`")
+        lines.append(
+            f"- repeated stocks: `{prediction_diagnostics.get('repeated_stocks_csv', '')}`"
+        )
         lines.append(
             f"- mean score from diagnostics: `{format_optional_score(prediction_diagnostics.get('mean_score_from_diagnostics'))}`"
         )
         lines.append(
             f"- mean pred-score/return spearman: `{format_optional_score(prediction_diagnostics.get('mean_spearman_pred_score_target_return'))}`"
         )
-        lines.append(f"- unique selected stocks: `{prediction_diagnostics.get('unique_selected_count', '')}`")
-        lines.append(f"- unique top20 stocks: `{prediction_diagnostics.get('unique_top20_count', '')}`")
+        lines.append(
+            f"- unique selected stocks: `{prediction_diagnostics.get('unique_selected_count', '')}`"
+        )
+        lines.append(
+            f"- unique top20 stocks: `{prediction_diagnostics.get('unique_top20_count', '')}`"
+        )
     else:
         lines.append("- 未生成预测诊断，通常是因为没有运行 walk-forward 窗口。")
 
@@ -1605,7 +1971,10 @@ def main() -> None:
     tune_env = get_tune_env_snapshot()
     ensemble_sources_raw = os.environ.get("BDC_ENSEMBLE_SOURCES", "")
     if tune_env:
-        logger.info("调参参数: %s", ", ".join(f"{key}={value}" for key, value in tune_env.items()))
+        logger.info(
+            "调参参数: %s",
+            ", ".join(f"{key}={value}" for key, value in tune_env.items()),
+        )
     logger.info(
         "walk-forward参数: windows=%s, target_days=%s, step_days=%s, skip_final=%s, resume=%s, rerun_predictions=%s, reuse_models_from=%s, dry_run=%s",
         args.windows,
@@ -1638,7 +2007,9 @@ def main() -> None:
     source_experiment_dir = resolve_experiment_ref(args.reuse_models_from)
     if ensemble_source_dirs and source_experiment_dir:
         raise ValueError("BDC_ENSEMBLE_SOURCES 与 --reuse-models-from 不能同时使用")
-    previous_manifest = read_json(experiment_dir / "manifest.json") if args.resume else {}
+    previous_manifest = (
+        read_json(experiment_dir / "manifest.json") if args.resume else {}
+    )
     data_signature = build_data_signature(full_df, dates)
     if args.resume:
         validate_resume_experiment(
@@ -1658,7 +2029,9 @@ def main() -> None:
         "git": git_info,
         "data_file": str(Path(data_file).resolve()),
         "data_signature": data_signature,
-        "reuse_models_from": display_path(source_experiment_dir) if source_experiment_dir else None,
+        "reuse_models_from": (
+            display_path(source_experiment_dir) if source_experiment_dir else None
+        ),
         "ensemble_sources": [display_path(path) for path in ensemble_source_dirs],
         "tune_env": tune_env,
         "walk_forward_args": get_walk_forward_args_snapshot(args, len(windows)),
@@ -1702,7 +2075,9 @@ def main() -> None:
         write_summary(experiment_dir, rows)
 
     if rows:
-        manifest["prediction_diagnostics"] = write_experiment_prediction_diagnostics(experiment_dir)
+        manifest["prediction_diagnostics"] = write_experiment_prediction_diagnostics(
+            experiment_dir
+        )
         scores = [row["score"] for row in rows]
         manifest["window_results"] = rows
         manifest["walk_forward_score_mean"] = float(sum(scores) / len(scores))
@@ -1739,7 +2114,9 @@ def main() -> None:
     manifest["total_duration"] = format_duration(total_seconds)
     write_json(experiment_dir / "manifest.json", manifest)
     write_experiment_note(experiment_dir, manifest)
-    logger.info("版本 %s 完成 | 总耗时=%s", args.version, format_duration(total_seconds))
+    logger.info(
+        "版本 %s 完成 | 总耗时=%s", args.version, format_duration(total_seconds)
+    )
 
 
 if __name__ == "__main__":

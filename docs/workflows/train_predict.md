@@ -116,6 +116,8 @@ stock_id,weight
 
 最多 5 只股票，权重和不能超过 1。当前默认逻辑是 `rank-replace` 模型 top5 等权重 `0.2`。
 
+LightGBM 当前只作为 walk-forward 实验档接入，profile 为 `noid-rank-lgbm`；正式 `train.sh/test.sh` 默认仍使用 `rank-replace` Transformer 单模型。只有在多窗口验证通过并单独修改提交入口后，才应把 LightGBM 用于正式提交。
+
 如果要运行原始单模型配置或可选集成，可显式启用：
 
 ```bash

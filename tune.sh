@@ -78,6 +78,10 @@ case "${1:-}" in
     profile="noid-rank-replace"
     shift
     ;;
+  noid-rank-lgbm|rank-lgbm|lgbm|--noid-rank-lgbm|--rank-lgbm|--lgbm)
+    profile="noid-rank-lgbm"
+    shift
+    ;;
   noid-rank-sharp|rank-sharp|--noid-rank-sharp|--rank-sharp)
     profile="noid-rank-sharp"
     shift
@@ -351,6 +355,30 @@ case "$profile" in
     set_default BDC_NUM_PROCESSES 6
     set_default BDC_TORCH_NUM_THREADS 4
     set_default BDC_TENSORBOARD 0
+    ;;
+  noid-rank-lgbm)
+    set_default BDC_MODEL_KIND lgbm
+    set_default BDC_WF_WINDOWS 6
+    set_default BDC_FEATURE_NUM 39
+    set_default BDC_SEQUENCE_LENGTH 45
+    set_default BDC_TRAIN_TARGET_DAYS 120
+    set_default BDC_VAL_DAYS 5
+    set_default BDC_MAX_STOCKS_PER_DAY 0
+    set_default BDC_USE_INSTRUMENT_FEATURE 0
+    set_default BDC_USE_CROSS_SECTIONAL_RANKS 1
+    set_default BDC_CROSS_SECTIONAL_RANK_MODE replace
+    set_default BDC_NUM_PROCESSES 6
+    set_default BDC_TORCH_NUM_THREADS 4
+    set_default BDC_TENSORBOARD 0
+    set_default BDC_LGBM_N_ESTIMATORS 300
+    set_default BDC_LGBM_LEARNING_RATE 0.03
+    set_default BDC_LGBM_NUM_LEAVES 31
+    set_default BDC_LGBM_MIN_CHILD_SAMPLES 20
+    set_default BDC_LGBM_SUBSAMPLE 0.9
+    set_default BDC_LGBM_COLSAMPLE_BYTREE 0.9
+    set_default BDC_LGBM_REG_ALPHA 0.0
+    set_default BDC_LGBM_REG_LAMBDA 1.0
+    set_default BDC_LGBM_NUM_THREADS 8
     ;;
   noid-rank-sharp)
     set_default BDC_WF_WINDOWS 3
@@ -1036,7 +1064,7 @@ case "$profile" in
     set_default BDC_TENSORBOARD 0
     ;;
   *)
-    echo "未知 tune profile: $profile，可选 quick、balanced、noid、noid-lowvol、ensemble-lowvol、noid-marketrel、noid-rank、noid-rank-lite、noid-rank-replace、noid-rank-sharp、noid-rank-trendq、noid-rank-cleanrisk、noid-rank-multiperiod、noid-rank-breadth、noid-rank-marketenv、noid-rank-marketenv-lite、noid-rank-marketenv-roll、noid-rank-momdelta、noid-rank-riskadj、noid-rank-ret5rank、noid-rank-overheatguard、noid-stable、noid-full、smooth、stable、large、full。" >&2
+    echo "未知 tune profile: $profile，可选 quick、balanced、noid、noid-lowvol、ensemble-lowvol、noid-marketrel、noid-rank、noid-rank-lite、noid-rank-replace、noid-rank-lgbm、noid-rank-sharp、noid-rank-trendq、noid-rank-cleanrisk、noid-rank-multiperiod、noid-rank-breadth、noid-rank-marketenv、noid-rank-marketenv-lite、noid-rank-marketenv-roll、noid-rank-momdelta、noid-rank-riskadj、noid-rank-ret5rank、noid-rank-overheatguard、noid-stable、noid-full、smooth、stable、large、full。" >&2
     exit 2
     ;;
 esac

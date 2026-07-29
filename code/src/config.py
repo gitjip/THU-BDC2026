@@ -29,11 +29,20 @@ feature_num = os.environ.get("BDC_FEATURE_NUM", "39" if fast_dev_mode else "158+
 use_market_relative_features = _env_bool("BDC_USE_MARKET_RELATIVE_FEATURES", False)
 use_market_breadth_features = _env_bool("BDC_USE_MARKET_BREADTH_FEATURES", False)
 use_market_env_features = _env_bool("BDC_USE_MARKET_ENV_FEATURES", False)
-market_env_feature_set = os.environ.get("BDC_MARKET_ENV_FEATURE_SET", "full").strip().lower()
+market_env_feature_set = (
+    os.environ.get("BDC_MARKET_ENV_FEATURE_SET", "full").strip().lower()
+)
 if market_env_feature_set in {"", "default"}:
     market_env_feature_set = "full"
 if market_env_feature_set not in {"full", "lite", "rolling"}:
-    raise ValueError(f"Unsupported BDC_MARKET_ENV_FEATURE_SET: {market_env_feature_set}")
+    raise ValueError(
+        f"Unsupported BDC_MARKET_ENV_FEATURE_SET: {market_env_feature_set}"
+    )
+model_kind = os.environ.get("BDC_MODEL_KIND", "transformer").strip().lower()
+if model_kind in {"", "torch"}:
+    model_kind = "transformer"
+if model_kind not in {"transformer", "lgbm"}:
+    raise ValueError(f"Unsupported BDC_MODEL_KIND: {model_kind}")
 use_rank_momentum_features = _env_bool("BDC_USE_RANK_MOMENTUM_FEATURES", False)
 use_rank_riskadj_features = _env_bool("BDC_USE_RANK_RISKADJ_FEATURES", False)
 use_ret5_rank_features = _env_bool("BDC_USE_RET5_RANK_FEATURES", False)
@@ -110,7 +119,11 @@ if use_market_relative_features:
 if use_market_breadth_features:
     feature_dir_label = f"{feature_dir_label}_breadth"
 if use_market_env_features:
-    env_label = "marketenv" if market_env_feature_set == "full" else f"marketenv_{market_env_feature_set}"
+    env_label = (
+        "marketenv"
+        if market_env_feature_set == "full"
+        else f"marketenv_{market_env_feature_set}"
+    )
     feature_dir_label = f"{feature_dir_label}_{env_label}"
 if use_rank_momentum_features:
     feature_dir_label = f"{feature_dir_label}_rankmom"
@@ -127,7 +140,10 @@ if use_clean_risk_features:
 if use_multi_period_features:
     feature_dir_label = f"{feature_dir_label}_multiperiod"
 output_dir_prefix = "debug_" if fast_dev_mode else ""
+if model_kind != "transformer":
+    feature_dir_label = f"{feature_dir_label}_{model_kind}"
 config = {
+    "model_kind": model_kind,
     "sequence_length": sequence_length,  # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
     "label_horizon": 5,  # 标签为未来第5个交易日相对未来第1个交易日的收益
     "prediction_horizon": 5,
@@ -202,6 +218,15 @@ config = {
     "top5_weight": 2.0,  # top-5样本权重（应大于base_weight）
     "loss_temperature": loss_temperature,
     "loss_target_temperature": loss_target_temperature,
+    "lgbm_n_estimators": _env_int("BDC_LGBM_N_ESTIMATORS", 300),
+    "lgbm_learning_rate": _env_float("BDC_LGBM_LEARNING_RATE", 0.03),
+    "lgbm_num_leaves": _env_int("BDC_LGBM_NUM_LEAVES", 31),
+    "lgbm_min_child_samples": _env_int("BDC_LGBM_MIN_CHILD_SAMPLES", 20),
+    "lgbm_subsample": _env_float("BDC_LGBM_SUBSAMPLE", 0.9),
+    "lgbm_colsample_bytree": _env_float("BDC_LGBM_COLSAMPLE_BYTREE", 0.9),
+    "lgbm_reg_alpha": _env_float("BDC_LGBM_REG_ALPHA", 0.0),
+    "lgbm_reg_lambda": _env_float("BDC_LGBM_REG_LAMBDA", 1.0),
+    "lgbm_num_threads": _env_int("BDC_LGBM_NUM_THREADS", 8),
     "output_dir": os.environ.get(
         "BDC_OUTPUT_DIR",
         f"./model/{output_dir_prefix}{sequence_length}_{feature_dir_label}",

@@ -219,6 +219,17 @@ experiments/analysis/validation_v1.4.1_vs_v1.4.2_vs_v1.4.3/
 - `v1.4.2 noid-rank-replace`：均值约 `0.020982`，最差窗口约 `-0.055007`，正分窗口 `10/18`；
 - `v1.4.3 ensemble-lowvol`：均值约 `0.017967`，最差窗口约 `-0.045579`，正分窗口 `10/18`。
 
+## 6. v1.12.0 LightGBM 第一版诊断
+
+`v1.12.0 noid-rank-lgbm` 用同日期 6 窗口对照 `v1.4.5 rank-replace`：
+
+- top5 均值约 `0.000968`，低于同日期 `rank-replace` 的 `0.018557`；
+- 最差窗口约 `-0.065830`，略好于同日期 `rank-replace` 的 `-0.066987`；
+- 正分窗口同为 `3/6`，逐窗口胜负也是 `3/6`；
+- 平均 Spearman、top20、top50 和真实 top5 命中数略好于同日期 `rank-replace`。
+
+当前判断：第一版 LGBM 不适合直接替代默认 top5 提交模型，但它说明树模型可能在 broader ranking 上有补充价值。下一步若继续，应优先做 `LGBMRanker` 或候选池并集诊断，而不是马上改 `train.sh/test.sh`。
+
 按早期新增 6 窗口和近期 12 窗口拆开看：
 
 - 早期 6 窗口均值：noid 约 `-0.025805`，rank-replace 约 `0.013438`，ensemble 约 `-0.007014`；
