@@ -150,3 +150,24 @@ sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final
 同一批 24 窗口上的阈值复盘显示，`BDC_GATE_OVERHEAT_THRESHOLD=0.65` 的事后均值约 `0.020205`，高于 `0.70` 的 `0.018227`。这只说明阈值 `0.65` 值得另起版本做小步复核，不能直接把本次结论改写成“0.65 已证明更好”。
 
 注意：这仍不改变 `train.sh/test.sh` 默认提交路径。正式默认仍是 rank-replace 单模型。
+
+## v1.13.* 公平复现计划
+
+`v1.13.0` 已在当前代码和当前 `stock_data` 下重跑 `noid-rank-replace` 24 窗口。结果均值约 `0.007778`，明显低于历史 `v1.4.5` 的 `0.017557`，相对历史 `v1.4.5` 的配对均值差约 `-0.009779`。这说明源模型重跑漂移已经不是可以忽略的小噪声。
+
+因此后续门控不再把旧 `v1.4.5` 作为严格公平基线。新的公平链路是：
+
+```bash
+sh tune.sh v1.13.2 noid-rank-lgbm --windows 24 --skip-final
+BDC_ENSEMBLE_SOURCES=v1.13.0,v1.13.2 sh tune.sh v1.13.3 ensemble-gate-overheat --windows 24 --skip-final
+BDC_ENSEMBLE_SOURCES=v1.13.0,v1.13.2 BDC_GATE_OVERHEAT_THRESHOLD=0.65 sh tune.sh v1.13.4 ensemble-gate-overheat --windows 24 --skip-final
+```
+
+验收时优先比较：
+
+- 严格主对照：`v1.13.0`；
+- 同源门控：`v1.13.3`，阈值 `0.70`；
+- 小步阈值复核：`v1.13.4`，阈值 `0.65`；
+- 历史参考：`v1.4.5`、`v1.12.4`，只能作为背景，不作为严格判定依据。
+
+`v1.13.1` 起，`walk_forward` 会在 `manifest.json` 和 `experiment_note.md` 里记录复用源实验的 version、profile、model kind、git commit 和数据摘要状态。如果源实验和当前 `stock_data` 都有数据摘要且不一致，流程会拒绝复用，避免再次把不同数据口径混进同一个对照。

@@ -720,6 +720,54 @@ def build_data_signature(full_df: pd.DataFrame, dates: pd.DatetimeIndex) -> dict
     }
 
 
+def summarize_source_experiment(
+    source_experiment_dir: Path,
+    current_data_signature: dict,
+) -> dict:
+    manifest = read_json(source_experiment_dir / "manifest.json")
+    tune_env = manifest.get("tune_env") or {}
+    git_info = manifest.get("git") or {}
+    source_signature = manifest.get("data_signature")
+    signature_status = "missing"
+    if source_signature:
+        signature_status = (
+            "match" if source_signature == current_data_signature else "mismatch"
+        )
+        if signature_status == "mismatch":
+            raise ValueError(
+                f"源实验 {display_path(source_experiment_dir)} 的 stock_data 摘要与当前数据不一致，"
+                f"不能公平复用。旧={source_signature}，新={current_data_signature}。"
+            )
+    else:
+        logger.warning(
+            "源实验 %s 缺少 data_signature，只能作为历史兼容复用，不能视为严格公平对照。",
+            display_path(source_experiment_dir),
+        )
+
+    return {
+        "label": experiment_source_label(source_experiment_dir),
+        "experiment": display_path(source_experiment_dir),
+        "version": manifest.get("version", source_experiment_dir.name),
+        "git": git_info,
+        "data_file": manifest.get("data_file", ""),
+        "data_signature": source_signature,
+        "data_signature_status": signature_status,
+        "profile": tune_env.get("BDC_TUNE_PROFILE", ""),
+        "model_kind": tune_env.get("BDC_MODEL_KIND", "transformer"),
+        "selection_strategy": tune_env.get("BDC_SELECTION_STRATEGY", "model_top5"),
+    }
+
+
+def summarize_source_experiments(
+    source_experiment_dirs: list[Path],
+    current_data_signature: dict,
+) -> list[dict]:
+    return [
+        summarize_source_experiment(path, current_data_signature)
+        for path in source_experiment_dirs
+    ]
+
+
 def validate_existing_window_row(
     window: WalkForwardWindow, existing_row: dict | None
 ) -> None:
@@ -1929,6 +1977,34 @@ def write_experiment_note(experiment_dir: Path, manifest: dict) -> None:
             ]
         )
 
+    source_details = manifest.get("source_experiment_details") or []
+    lines.extend(["", "## 模型复用", ""])
+    if source_details:
+        for source in source_details:
+            source_git = source.get("git") or {}
+            source_signature = source.get("data_signature") or {}
+            date_range = ""
+            if source_signature:
+                date_range = (
+                    f"{source_signature.get('start_date', '')}"
+                    f" ~ {source_signature.get('end_date', '')}"
+                )
+            lines.append(
+                "- `{label}`: `{experiment}` | version=`{version}` | profile=`{profile}` | "
+                "model=`{model_kind}` | git=`{commit}` | data=`{status}` {date_range}".format(
+                    label=source.get("label", ""),
+                    experiment=source.get("experiment", ""),
+                    version=source.get("version", ""),
+                    profile=source.get("profile", ""),
+                    model_kind=source.get("model_kind", ""),
+                    commit=source_git.get("commit", ""),
+                    status=source.get("data_signature_status", ""),
+                    date_range=date_range,
+                )
+            )
+    else:
+        lines.append("- 未复用其它实验模型。")
+
     lines.extend(["", "## 结果", ""])
     if rows:
         lines.extend(
@@ -2056,6 +2132,15 @@ def main() -> None:
         read_json(experiment_dir / "manifest.json") if args.resume else {}
     )
     data_signature = build_data_signature(full_df, dates)
+    source_experiment_details = []
+    if ensemble_source_dirs:
+        source_experiment_details = summarize_source_experiments(
+            ensemble_source_dirs, data_signature
+        )
+    elif source_experiment_dir:
+        source_experiment_details = summarize_source_experiments(
+            [source_experiment_dir], data_signature
+        )
     if args.resume:
         validate_resume_experiment(
             experiment_dir=experiment_dir,
@@ -2078,6 +2163,7 @@ def main() -> None:
             display_path(source_experiment_dir) if source_experiment_dir else None
         ),
         "ensemble_sources": [display_path(path) for path in ensemble_source_dirs],
+        "source_experiment_details": source_experiment_details,
         "tune_env": tune_env,
         "walk_forward_args": get_walk_forward_args_snapshot(args, len(windows)),
         "fast_dev_mode": parse_bool_env("BDC_FAST_DEV", False),

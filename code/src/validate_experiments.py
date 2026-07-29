@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -26,15 +27,31 @@ TRAINING_BUDGET_KEYS = {
     "BDC_LR_SCHEDULER",
     "BDC_EARLY_STOPPING_PATIENCE",
     "BDC_EARLY_STOPPING_MIN_DELTA",
+    "BDC_LR_PATIENCE",
+    "BDC_LR_FACTOR",
+    "BDC_LR_THRESHOLD",
+    "BDC_MIN_LR",
     "BDC_LOSS_TEMPERATURE",
     "BDC_LOSS_TARGET_TEMPERATURE",
+    "BDC_LGBM_N_ESTIMATORS",
+    "BDC_LGBM_LEARNING_RATE",
+    "BDC_LGBM_NUM_LEAVES",
+    "BDC_LGBM_MIN_CHILD_SAMPLES",
+    "BDC_LGBM_SUBSAMPLE",
+    "BDC_LGBM_COLSAMPLE_BYTREE",
+    "BDC_LGBM_REG_ALPHA",
+    "BDC_LGBM_REG_LAMBDA",
+    "BDC_LGBM_NUM_THREADS",
 }
 
 FEATURE_OR_STRATEGY_KEYS = {
     "BDC_TUNE_PROFILE",
+    "BDC_MODEL_KIND",
     "BDC_USE_INSTRUMENT_FEATURE",
     "BDC_USE_MARKET_RELATIVE_FEATURES",
     "BDC_USE_MARKET_BREADTH_FEATURES",
+    "BDC_USE_MARKET_ENV_FEATURES",
+    "BDC_MARKET_ENV_FEATURE_SET",
     "BDC_USE_RANK_MOMENTUM_FEATURES",
     "BDC_USE_RANK_RISKADJ_FEATURES",
     "BDC_USE_RET5_RANK_FEATURES",
@@ -50,10 +67,14 @@ FEATURE_OR_STRATEGY_KEYS = {
     "BDC_TOTAL_EXPOSURE",
     "BDC_STAGE2_POOL_SIZE",
     "BDC_STAGE2_VOL_WINDOW",
+    "BDC_GATE_OVERHEAT_THRESHOLD",
     "BDC_ENSEMBLE_SOURCES",
 }
 
 COMPARABILITY_KEYS = sorted(TRAINING_BUDGET_KEYS | FEATURE_OR_STRATEGY_KEYS)
+FALSE_LIKE_CONFIG_KEYS = {
+    key for key in COMPARABILITY_KEYS if key.startswith("BDC_USE_")
+}
 
 
 def resolve_path(value: str | Path) -> Path:
@@ -89,6 +110,39 @@ def safe_sum(frame: pd.DataFrame, column: str):
     if values.empty:
         return None
     return float(values.sum())
+
+
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def normalize_config_value(key: str, value) -> str:
+    if value in (None, ""):
+        return "0" if key in FALSE_LIKE_CONFIG_KEYS else ""
+    return str(value)
+
+
+def cvar_tail_count(count: int, fraction: float = 0.20) -> int:
+    return max(1, math.ceil(count * fraction))
+
+
+def score_risk_metrics(score: pd.Series) -> dict:
+    score = pd.to_numeric(score, errors="coerce").dropna()
+    if score.empty:
+        return {
+            "worst3_mean_score": None,
+            "cvar_20_score": None,
+            "risk_adjusted_score": None,
+        }
+    std_score = float(score.std(ddof=0))
+    return {
+        "worst3_mean_score": float(score.nsmallest(min(3, len(score))).mean()),
+        "cvar_20_score": float(score.nsmallest(cvar_tail_count(len(score))).mean()),
+        "risk_adjusted_score": float(score.mean() - 0.5 * std_score),
+    }
 
 
 def read_score_summary(experiment_dir: Path) -> pd.DataFrame:
@@ -144,7 +198,7 @@ def build_config_comparison(experiment_dirs: list[Path]) -> pd.DataFrame:
     envs = {label: read_tune_env(path) for label, path in zip(labels, experiment_dirs)}
     rows = []
     for key in COMPARABILITY_KEYS:
-        values = [str(envs[label].get(key, "")) for label in labels]
+        values = [normalize_config_value(key, envs[label].get(key, "")) for label in labels]
         if all(value == "" for value in values):
             continue
         if key in TRAINING_BUDGET_KEYS:
@@ -194,6 +248,7 @@ def build_summary_rows(experiment_dirs: list[Path], match_keys: list[str]) -> pd
                 "mean_score": float(score.mean()),
                 "median_score": float(score.median()),
                 "std_score": float(score.std(ddof=0)),
+                **score_risk_metrics(score),
                 "min_score": float(score.min()),
                 "max_score": float(score.max()),
                 "positive_windows": int((score > 0).sum()),
@@ -235,6 +290,49 @@ def build_paired_diffs(experiment_dirs: list[Path], ensemble_label: str, match_k
     return merged
 
 
+def positive_top2_share(diff: pd.Series) -> float | None:
+    positives = pd.to_numeric(diff, errors="coerce")
+    positives = positives[positives > 0]
+    total = float(positives.sum())
+    if positives.empty or total <= 0:
+        return None
+    return float(positives.nlargest(min(2, len(positives))).sum() / total)
+
+
+def build_paired_summary(paired: pd.DataFrame, ensemble_label: str) -> pd.DataFrame:
+    rows = []
+    for column in paired.columns:
+        if not column.startswith(f"{ensemble_label}_minus_"):
+            continue
+        baseline = column.removeprefix(f"{ensemble_label}_minus_")
+        diff = pd.to_numeric(paired[column], errors="coerce").dropna()
+        if diff.empty:
+            continue
+        wins = int((diff > 0).sum())
+        losses = int((diff < 0).sum())
+        ties = int((diff == 0).sum())
+        changed = wins + losses
+        rows.append(
+            {
+                "candidate": ensemble_label,
+                "baseline": baseline,
+                "window_count": int(len(diff)),
+                "paired_mean_diff": float(diff.mean()),
+                "paired_median_diff": float(diff.median()),
+                "win_windows": wins,
+                "loss_windows": losses,
+                "tie_windows": ties,
+                "win_rate": float(wins / len(diff)),
+                "active_win_rate": float(wins / changed) if changed else None,
+                "non_loss_rate": float((wins + ties) / len(diff)),
+                "min_diff": float(diff.min()),
+                "max_diff": float(diff.max()),
+                "top2_positive_diff_share": positive_top2_share(diff),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_diagnostic_summary(experiment_dirs: list[Path], match_keys: list[str]) -> pd.DataFrame:
     rows = []
     for experiment_dir in experiment_dirs:
@@ -257,25 +355,42 @@ def build_diagnostic_summary(experiment_dirs: list[Path], match_keys: list[str])
     return pd.DataFrame(rows)
 
 
-def judge(summary: pd.DataFrame, paired: pd.DataFrame, ensemble_label: str) -> list[str]:
+def judge(
+    summary: pd.DataFrame,
+    paired_summary: pd.DataFrame,
+    ensemble_label: str,
+) -> list[str]:
     lines = []
     ensemble = summary[summary["experiment"].eq(ensemble_label)].iloc[0]
     baselines = summary[~summary["experiment"].eq(ensemble_label)]
     best_baseline_mean = float(baselines["mean_score"].max())
-    best_baseline_min = float(baselines["min_score"].max())
+    best_baseline_worst3 = float(baselines["worst3_mean_score"].max())
+    best_baseline_cvar = float(baselines["cvar_20_score"].max())
     lines.append(
-        f"- `{ensemble_label}` 均值 `{ensemble['mean_score']:.6f}`，最差窗口 `{ensemble['min_score']:.6f}`，"
+        f"- `{ensemble_label}` 均值 `{ensemble['mean_score']:.6f}`，"
+        f"worst3 `{ensemble['worst3_mean_score']:.6f}`，"
+        f"CVaR20 `{ensemble['cvar_20_score']:.6f}`，"
         f"正分窗口 `{int(ensemble['positive_windows'])}/{int(ensemble['window_count'])}`。"
     )
-    lines.append(f"- 最好源模型均值 `{best_baseline_mean:.6f}`，最好源模型最差窗口 `{best_baseline_min:.6f}`。")
-    for column in paired.columns:
-        if column.startswith(f"{ensemble_label}_minus_"):
-            target = column.removeprefix(f"{ensemble_label}_minus_")
-            mean_diff = float(paired[column].mean())
-            win_count = int((paired[column] > 0).sum())
-            lines.append(f"- 相对 `{target}`：平均差值 `{mean_diff:.6f}`，胜出窗口 `{win_count}/{len(paired)}`。")
+    lines.append(
+        f"- 最好源模型均值 `{best_baseline_mean:.6f}`，"
+        f"最好源模型 worst3 `{best_baseline_worst3:.6f}`，"
+        f"最好源模型 CVaR20 `{best_baseline_cvar:.6f}`。"
+    )
+    for _, row in paired_summary.iterrows():
+        top2_share = row.get("top2_positive_diff_share")
+        top2_text = "" if pd.isna(top2_share) else f"，top2贡献 `{top2_share:.3f}`"
+        lines.append(
+            f"- 相对 `{row['baseline']}`：平均差值 `{row['paired_mean_diff']:.6f}`，"
+            f"胜/负/平 `{int(row['win_windows'])}/{int(row['loss_windows'])}/{int(row['tie_windows'])}`"
+            f"{top2_text}。"
+        )
 
-    if float(ensemble["mean_score"]) > best_baseline_mean and float(ensemble["min_score"]) >= best_baseline_min - 0.01:
+    if (
+        float(ensemble["mean_score"]) > best_baseline_mean
+        and float(ensemble["worst3_mean_score"]) >= best_baseline_worst3 - 0.005
+        and float(ensemble["cvar_20_score"]) >= best_baseline_cvar - 0.005
+    ):
         lines.append(f"- 结论：支持继续使用 `{ensemble_label}`。")
     elif float(ensemble["mean_score"]) > best_baseline_mean:
         lines.append(f"- 结论：均值支持 `{ensemble_label}`，但最差窗口需要谨慎复核。")
@@ -295,6 +410,7 @@ def write_readme(
     ensemble_label: str,
     summary: pd.DataFrame,
     paired: pd.DataFrame,
+    paired_summary: pd.DataFrame,
     config_comparison: pd.DataFrame,
 ) -> None:
     labels = [experiment_label(path) for path in experiment_dirs]
@@ -315,6 +431,7 @@ def write_readme(
             "",
             "- `summary.csv`：总体分数指标。",
             "- `paired_diffs.csv`：候选实验相对其它实验的逐窗口差值；优先按目标日期对齐，缺少目标日期时才按窗口编号对齐。",
+            "- `paired_summary.csv`：候选实验相对其它实验的配对均值、胜负窗口和改善集中度。",
             "- `diagnostic_summary.csv`：排序诊断聚合指标。",
             "- `config_comparison.csv`：关键配置差异，用于判断是否是严格公平对照。",
             "",
@@ -350,7 +467,7 @@ def write_readme(
             "",
         ]
     )
-    lines.extend(judge(summary, paired, ensemble_label))
+    lines.extend(judge(summary, paired_summary, ensemble_label))
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "readme.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -386,15 +503,25 @@ def main() -> None:
         raise ValueError("no common validation windows found")
     summary = build_summary_rows(experiment_dirs, match_keys)
     paired = build_paired_diffs(experiment_dirs, ensemble_label=ensemble_label, match_keys=match_keys)
+    paired_summary = build_paired_summary(paired, ensemble_label=ensemble_label)
     diagnostic = build_diagnostic_summary(experiment_dirs, match_keys)
     config_comparison = build_config_comparison(experiment_dirs)
     summary.to_csv(output_dir / "summary.csv", index=False)
     paired.to_csv(output_dir / "paired_diffs.csv", index=False)
+    paired_summary.to_csv(output_dir / "paired_summary.csv", index=False)
     diagnostic.to_csv(output_dir / "diagnostic_summary.csv", index=False)
     config_comparison.to_csv(output_dir / "config_comparison.csv", index=False)
-    write_readme(output_dir, experiment_dirs, ensemble_label, summary, paired, config_comparison)
+    write_readme(
+        output_dir,
+        experiment_dirs,
+        ensemble_label,
+        summary,
+        paired,
+        paired_summary,
+        config_comparison,
+    )
 
-    print(f"validation summary written to: {output_dir.relative_to(REPO_ROOT)}")
+    print(f"validation summary written to: {display_path(output_dir)}")
 
 
 if __name__ == "__main__":
