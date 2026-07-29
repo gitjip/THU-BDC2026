@@ -127,6 +127,13 @@ sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final
 
 它仍复用 `v1.4.5 + v1.12.0`，只是把“主模型 top5 过热时切防守”的门控逻辑接入实际 walk-forward 预测流程。
 
+24 窗口结果：
+
+- `v1.12.4 ensemble-gate-overheat` 均值约 `0.018227`；
+- 相比旧 `v1.4.5 rank-replace` 的 `0.017557` 只小幅提高，但 worst3、CVaR20、最差窗口和正分窗口都有改善；
+- 相比 `v1.12.1 ensemble-lowoverheat` 的 `0.014789`，均值更好，说明门控确实减少了固定防守策略对高分窗口的削弱；
+- 但当前代码重跑源模型与旧 `v1.4.5` 保存预测不完全一致，且均值提升很小，因此不能直接切默认。
+
 验收：
 
 - 先与同日期 `v1.4.5 noid-rank-replace` 配对比较；
