@@ -355,11 +355,13 @@ experiments/analysis/review_v1.4.5_rank_replace_24/
 
 “k 越小越激进”只在总仓位仍为 1 时成立。例如 k=1 满仓就是单票 100% 仓位，k=3 满仓就是每只约 33.3%。如果仍然按每只 `0.2` 给权重，那么 k=3 只是总仓位 `0.6`，反而更保守。
 
-基于 `v1.4.5 rank-replace` 24 窗口的离线复盘，产物位于：
+基于 `v1.4.5 rank-replace` 24 窗口的离线复盘，使用命令：
 
-```text
-experiments/analysis/topk_cash_review/
+```bash
+.venv/bin/python code/src/evaluate_submission_controls.py experiments/v1.4.5 --output-dir experiments/analysis/topk_exposure_v1.4.5_rank_replace_24
 ```
+
+产物位于 `experiments/analysis/topk_exposure_v1.4.5_rank_replace_24/`。该脚本只读取已有 `prediction_diagnostics.csv`，不重跑训练或预测。
 
 满仓等权结果：
 
@@ -368,6 +370,7 @@ experiments/analysis/topk_cash_review/
 - k=3 最差窗口约 `-0.075930`，差于 k=5 的 `-0.066987`；
 - k=3 正分窗口 `13/24`，略低于 k=5 的 `14/24`；
 - k=1 最大收益最高，约 `0.203625`，但均值只有 `0.010892`，中位数为负，最差窗口约 `-0.121312`。
+- 按均值/标准差看，k=5 约 `0.348872`，高于 k=3 的 `0.324415`。
 
 固定每股 `0.2` 权重、少选则留现金的结果：
 
@@ -377,12 +380,14 @@ experiments/analysis/topk_cash_review/
 
 现金仓位方面，简单固定降仓只会线性缩放收益和亏损。在 `v1.4.5` 24 窗口均值为正的前提下，固定不满仓会降低平均分，只能改善最差亏损幅度。
 
+顺手对照 `v1.4.7 noid` 后，满仓 top5 也是 noid 中均值最高的 k。也就是说，“缩小 k”不是稳定规律，只是在 `rank-replace` 中 top3 提高了均值但放大了波动。
+
 用模型分数做动态是否持股，目前也没有足够证据。top1 分数、top5 分数差、top20 分数差与 top5 未来收益的相关性都很弱；已测试的简单阈值规则都低于“k=5 满仓等权”的均值，最好规则均值约 `0.014772`，仍低于 `0.017557`。
 
 当前判断：
 
 - 默认提交暂不改，仍使用 k=5、总仓位 1.0；
-- k=3 满仓可以作为下一轮候选实验，因为它在 24 窗口均值更高，但需要接受更大回撤和更低正分窗口数；
+- k=3 满仓可以作为高风险候选，因为它在 `rank-replace` 24 窗口均值更高，但需要接受更大回撤、更低正分窗口数和更差的均值/波动比；
 - 不建议默认 k=1，单票满仓过于依赖模型 top1 命中率，而当前 top1 稳定性不足；
 - 不建议默认留现金，除非后续找到只用预测时可得信息的可靠置信度信号。
 

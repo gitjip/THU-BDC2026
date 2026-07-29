@@ -217,6 +217,14 @@ BDC_TARGET_START_DATE=2026-08-08 sh test.sh
 BDC_MARKET_HOLIDAYS=2026-08-03 sh test.sh
 ```
 
+离线评估不同 topK 和现金仓位时，不需要重训：
+
+```bash
+.venv/bin/python code/src/evaluate_submission_controls.py experiments/v1.4.5 --output-dir experiments/analysis/topk_exposure_v1.4.5_rank_replace_24
+```
+
+固定 `top_k` 时，`total_exposure` 只会线性缩放收益和亏损；它适合控制风险幅度，但不会让排序本身变好。
+
 ## 7. 注意事项
 
 - 正式提交结果必须由模型训练和预测产生，不能硬编码股票代码。
