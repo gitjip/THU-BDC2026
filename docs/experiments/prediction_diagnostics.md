@@ -422,7 +422,44 @@ windows/window_*/score.json
 
 下一步优先用完整排名判断是否存在“固定选股池”。确认后再决定是改特征、改损失，还是做多种子集成。
 
-## 10. 固定选股池的优先嫌疑
+## 10. 高分好股/坏股差异分析
+
+从 `v1.9.1` 开始，可以直接复盘“模型给高分，但未来到底是好股还是坏股”：
+
+```bash
+.venv/bin/python code/src/analyze_high_score_good_bad.py experiments/v1.4.5 --top-k 20
+```
+
+默认输出到：
+
+```text
+experiments/analysis/high_score_good_bad_v1.4.5/
+```
+
+主要文件：
+
+- `high_score_pool.csv`：每个窗口模型 rank 前 20 的候选池；
+- `feature_differences.csv`：高分好股与高分坏股的历史特征差异；
+- `repeated_stocks.csv`：反复进入高分池且坏次数多的股票；
+- `simple_gate_trials.csv`：只用预测日前历史特征做简单过滤/重排的离线试算；
+- `simple_gate_windows.csv`：简单规则逐窗口明细。
+
+以 `v1.4.5 noid-rank-replace` 24 窗口为例，高分池共 `480` 个样本，其中 good/bad/middle 为 `132/143/205`。最明显的区别是高分坏股更像短期过热：
+
+- `hist_close_gap_5ma_xrank`：bad 均值约 `0.545`，good 均值约 `0.424`；
+- `hist_return_3_xrank`：bad 均值约 `0.548`，good 均值约 `0.445`；
+- `hist_intraday_range`、`hist_return_5_xrank` 也是 bad 更高。
+
+简单规则试算只给出很弱的支持：`drop_short_overheat_ge_0.85` 的 24 窗口均值约 `0.017808`，只比原始 top5 的 `0.017557` 高约 `0.000251`，且胜/负窗口都是 `7/7`。这说明“短期过热惩罚”值得作为小信号继续试，但证据不足以直接改默认提交策略。
+
+当前判断：
+
+- 不要把单纯 `return_5_cs_rank` 当正向信号继续堆，它已经在 `v1.9.0` 明显失败；
+- 如果继续做短期相对强弱，优先改成“过热惩罚/保护”而不是“越强越买”；
+- `drawdown` 单独看不可靠，当前高分好股的回撤 rank 反而略高，不能直接做硬过滤；
+- 重复坏股表只能用于诊断，不应硬编码排除股票代码。
+
+## 11. 固定选股池的优先嫌疑
 
 早期 39 特征配置默认包含 `instrument`。它是股票代码映射后的整数索引，不是真正的行业、风格或基本面特征。模型把它当连续数值输入时，可能学到“某些编号长期更该被选”的身份偏好。当前默认提交配置已经移除 `instrument`，这里保留的是历史判断依据。
 
@@ -442,7 +479,7 @@ sh tune.sh v1.2.8 noid --skip-final
 
 `noid` 只是不把 `instrument` 输入模型。股票代码仍用于数据分组、序列构造、打分和输出，不会影响提交文件格式。
 
-## 11. v1.2.8 noid 后续
+## 12. v1.2.8 noid 后续
 
 `v1.2.8 noid` 的多窗口均值改善，说明移除 `instrument` 是值得继续观察的方向。但完整排名也显示，模型更容易选到高波动股票，第二个窗口表现明显拖累均值。
 
@@ -459,7 +496,7 @@ sh tune.sh v1.2.9 noid-stable --skip-final
 - top5 是否继续集中在高波动股票；
 - `prediction_scores.csv` 中入选股票和未入选股票的 `pred_score` 差距是否过大。
 
-## 12. resume 产物注意
+## 13. resume 产物注意
 
 早期版本用 `--resume` 补预测诊断文件时，可能会把 `summary.csv` 中已有训练耗时覆盖为空。后续流程会尽量从旧 `summary.csv` 和 `manifest.json` 保留已有耗时。
 

@@ -233,6 +233,14 @@ BDC_MARKET_HOLIDAYS=2026-08-03 sh test.sh
 
 固定 `top_k` 时，`total_exposure` 只会线性缩放收益和亏损；它适合控制风险幅度，但不会让排序本身变好。
 
+离线分析“模型高分但未来表现差”的股票时，也不需要重训：
+
+```bash
+.venv/bin/python code/src/analyze_high_score_good_bad.py experiments/v1.4.5 --top-k 20
+```
+
+输出目录默认在 `experiments/analysis/high_score_good_bad_<version>/`。重点看 `feature_differences.csv` 和 `simple_gate_trials.csv`：前者解释高分好股/坏股的历史特征差异，后者粗测这些差异能否变成只依赖历史数据的简单过滤或重排规则。
+
 ## 7. 注意事项
 
 - 正式提交结果必须由模型训练和预测产生，不能硬编码股票代码。
