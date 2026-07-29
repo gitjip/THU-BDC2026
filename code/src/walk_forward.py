@@ -81,6 +81,22 @@ NOTE_CONFIG_KEYS = [
     "BDC_EARLY_STOPPING_PATIENCE",
 ]
 
+RESUME_IGNORED_TUNE_ENV_KEYS = {
+    "BDC_NUM_PROCESSES",
+    "BDC_TORCH_NUM_THREADS",
+    "BDC_TENSORBOARD",
+}
+
+RESUME_BOOL_FALSE_ENV_KEYS = {
+    "BDC_USE_INSTRUMENT_FEATURE",
+    "BDC_USE_MARKET_RELATIVE_FEATURES",
+    "BDC_USE_MARKET_BREADTH_FEATURES",
+    "BDC_USE_TREND_QUALITY_FEATURES",
+    "BDC_USE_CLEAN_RISK_FEATURES",
+    "BDC_USE_MULTI_PERIOD_FEATURES",
+    "BDC_USE_CROSS_SECTIONAL_RANKS",
+}
+
 
 def format_duration(seconds: float | None) -> str:
     if seconds is None:
@@ -395,16 +411,20 @@ def source_window_model_dir(source_experiment_dir: Path | None, window: WalkForw
             )
 
     model_dir = source_window_dir / "model"
-    if not (model_dir / "best_model.pth").exists() or not (model_dir / "scaler.pkl").exists():
+    if not model_artifacts_exist(model_dir):
         raise FileNotFoundError(f"复用模型缺少 best_model.pth 或 scaler.pkl: {model_dir}")
     return model_dir
+
+
+def model_artifacts_exist(model_dir: Path) -> bool:
+    return (model_dir / "best_model.pth").exists() and (model_dir / "scaler.pkl").exists()
 
 
 def source_final_model_dir(source_experiment_dir: Path | None) -> Path | None:
     if source_experiment_dir is None:
         return None
     model_dir = source_experiment_dir / "final" / "model"
-    if not (model_dir / "best_model.pth").exists() or not (model_dir / "scaler.pkl").exists():
+    if not model_artifacts_exist(model_dir):
         raise FileNotFoundError(f"复用最终模型缺少 best_model.pth 或 scaler.pkl: {model_dir}")
     return model_dir
 
@@ -420,6 +440,131 @@ def read_existing_summary(experiment_dir: Path) -> dict[str, dict]:
         str(row["window"]): row.to_dict()
         for _, row in summary.iterrows()
     }
+
+
+def normalize_resume_env_value(key: str, value) -> str:
+    if value is None or value == "":
+        return "0" if key in RESUME_BOOL_FALSE_ENV_KEYS else ""
+    normalized = str(value)
+    if key in RESUME_BOOL_FALSE_ENV_KEYS:
+        lowered = normalized.strip().lower()
+        if lowered in {"0", "false", "no", "off"}:
+            return "0"
+        if lowered in {"1", "true", "yes", "on"}:
+            return "1"
+    return normalized
+
+
+def resume_tune_env(tune_env: dict) -> dict[str, str]:
+    keys = set(tune_env) - RESUME_IGNORED_TUNE_ENV_KEYS
+    return {key: normalize_resume_env_value(key, tune_env.get(key)) for key in sorted(keys)}
+
+
+def window_identity(window: WalkForwardWindow | dict) -> dict[str, str | list[str]]:
+    if isinstance(window, WalkForwardWindow):
+        return {
+            "name": window.name,
+            "as_of_date": window.as_of_date,
+            "target_dates": format_date_list(window.target_dates),
+        }
+    return {
+        "name": str(window.get("name") or ""),
+        "as_of_date": str(window.get("as_of_date") or ""),
+        "target_dates": format_date_list(window.get("target_dates") or window.get("target_trading_dates") or []),
+    }
+
+
+def build_data_signature(full_df: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
+    return {
+        "row_count": int(len(full_df)),
+        "stock_count": int(full_df["股票代码"].nunique()) if "股票代码" in full_df.columns else None,
+        "trading_day_count": int(len(dates)),
+        "start_date": pd.Timestamp(dates[0]).strftime("%Y-%m-%d") if len(dates) else "",
+        "end_date": pd.Timestamp(dates[-1]).strftime("%Y-%m-%d") if len(dates) else "",
+    }
+
+
+def validate_existing_window_row(window: WalkForwardWindow, existing_row: dict | None) -> None:
+    if not existing_row:
+        return
+
+    row_as_of = str(existing_row.get("as_of_date") or "")
+    row_target_dates = str(existing_row.get("target_dates") or "")
+    if row_as_of and row_as_of != window.as_of_date:
+        raise ValueError(
+            f"{window.name} 的 summary.csv 日期与当前窗口不一致: "
+            f"as_of 旧={row_as_of}, 新={window.as_of_date}。请换版本号或清理旧窗口后重跑。"
+        )
+    if row_target_dates:
+        parsed_target_dates = [item.strip() for item in row_target_dates.split(",") if item.strip()]
+        if parsed_target_dates != format_date_list(window.target_dates):
+            raise ValueError(
+                f"{window.name} 的 summary.csv 目标日期与当前窗口不一致: "
+                f"旧={parsed_target_dates}, 新={format_date_list(window.target_dates)}。请换版本号或清理旧窗口后重跑。"
+            )
+
+
+def validate_resume_window(
+    window_dir: Path,
+    window: WalkForwardWindow,
+    previous_metadata: dict,
+    existing_row: dict | None,
+    requires_existing_metadata: bool,
+) -> None:
+    validate_existing_window_row(window, existing_row)
+    if not requires_existing_metadata:
+        return
+    if not previous_metadata:
+        raise ValueError(f"{window_dir} 缺少 metadata.json，不能安全 --resume。请换版本号或清理旧窗口后重跑。")
+
+    previous_window = previous_metadata.get("window") or {}
+    if window_identity(previous_window) != window_identity(window):
+        raise ValueError(
+            f"{window_dir} 的 metadata.json 窗口日期与当前窗口不一致，不能安全 --resume。"
+            f"旧={window_identity(previous_window)}, 新={window_identity(window)}。请换版本号或清理旧窗口后重跑。"
+        )
+
+
+def validate_resume_experiment(
+    experiment_dir: Path,
+    previous_manifest: dict,
+    tune_env: dict,
+    windows: list[WalkForwardWindow],
+    data_signature: dict,
+) -> None:
+    if not previous_manifest:
+        if experiment_dir.exists() and any(experiment_dir.iterdir()):
+            raise ValueError(f"{experiment_dir} 已有内容但缺少 manifest.json，不能安全 --resume。请换版本号或清理目录。")
+        return
+
+    previous_signature = previous_manifest.get("data_signature")
+    if previous_signature and previous_signature != data_signature:
+        raise ValueError(
+            "当前 stock_data 摘要与旧 manifest 不一致，不能安全 --resume。"
+            f"旧={previous_signature}, 新={data_signature}。请换版本号重新跑。"
+        )
+
+    previous_windows = [window_identity(item) for item in previous_manifest.get("windows") or []]
+    current_windows = [window_identity(window) for window in windows]
+    if previous_windows and previous_windows != current_windows:
+        raise ValueError(
+            "当前 walk-forward 窗口日期与旧 manifest 不一致，不能安全 --resume。"
+            f"旧={previous_windows}, 新={current_windows}。请换版本号重新跑。"
+        )
+
+    previous_env = resume_tune_env(previous_manifest.get("tune_env") or {})
+    current_env = resume_tune_env(tune_env)
+    keys = sorted(set(previous_env) | set(current_env))
+    mismatches = [
+        f"{key}: 旧={previous_env.get(key, '')}, 新={current_env.get(key, '')}"
+        for key in keys
+        if normalize_resume_env_value(key, previous_env.get(key)) != normalize_resume_env_value(key, current_env.get(key))
+    ]
+    if mismatches:
+        detail = "; ".join(mismatches[:8])
+        if len(mismatches) > 8:
+            detail = f"{detail}; ..."
+        raise ValueError(f"当前调参配置与旧 manifest 不一致，不能安全 --resume。{detail}。请换版本号重新跑。")
 
 
 def optional_float(value) -> float | None:
@@ -746,34 +891,43 @@ def run_window(
         f"{window.name} | as_of={window.as_of_date} | target={window.target_start_date} ~ {window.target_end_date}"
     )
 
-    train_data_path, target_data_path = write_window_data(full_df, window, window_dir)
-    write_json(
-        metadata_path,
-        {
-            "version": version,
-            "window": build_window_metadata(window, trading_dates),
-            "train_data": str(train_data_path.relative_to(REPO_ROOT)),
-            "target_data": str(target_data_path.relative_to(REPO_ROOT)),
-            "model_dir": display_path(active_model_dir),
-            "reused_model_dir": display_path(reused_model_dir) if reused_model_dir else None,
-            "prediction": str(prediction_path.relative_to(REPO_ROOT)),
-            "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
-            "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
-            "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
-            "score": str(score_path.relative_to(REPO_ROOT)),
-        },
+    previous_metadata = read_json(metadata_path) if resume else {}
+    will_skip_local_model = resume and reused_model_dir is None and model_artifacts_exist(model_dir)
+    will_skip_prediction = resume and not rerun_predictions and prediction_path.exists() and prediction_scores_path.exists()
+    validate_resume_window(
+        window_dir=window_dir,
+        window=window,
+        previous_metadata=previous_metadata,
+        existing_row=existing_row,
+        requires_existing_metadata=will_skip_local_model or will_skip_prediction,
     )
+
+    train_data_path, target_data_path = write_window_data(full_df, window, window_dir)
+    window_metadata = {
+        "version": version,
+        "window": build_window_metadata(window, trading_dates),
+        "train_data": str(train_data_path.relative_to(REPO_ROOT)),
+        "target_data": str(target_data_path.relative_to(REPO_ROOT)),
+        "model_dir": display_path(active_model_dir),
+        "reused_model_dir": display_path(reused_model_dir) if reused_model_dir else None,
+        "prediction": str(prediction_path.relative_to(REPO_ROOT)),
+        "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
+        "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
+        "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
+        "score": str(score_path.relative_to(REPO_ROOT)),
+    }
+    write_json(metadata_path, window_metadata)
 
     if reused_model_dir:
         logger.info("%s 复用模型，跳过训练: %s", window.name, display_path(reused_model_dir))
         train_seconds = 0.0
-    elif resume and (model_dir / "best_model.pth").exists():
+    elif will_skip_local_model:
         logger.info("%s 已有模型，跳过训练", window.name)
     else:
         logger.info("%s 训练: as_of=%s", window.name, window.as_of_date)
         train_seconds = run_train(model_dir=model_dir, stock_data_file=train_data_path, log_path=window_dir / "logs" / "train_command.log")
 
-    if resume and not rerun_predictions and prediction_path.exists() and prediction_scores_path.exists():
+    if will_skip_prediction:
         logger.info("%s 已有预测结果，跳过预测", window.name)
     else:
         logger.info("%s 预测: 目标窗口=%s ~ %s", window.name, window.target_start_date, window.target_end_date)
@@ -872,6 +1026,21 @@ def run_ensemble_window(
         f"{window.name} | ensemble | as_of={window.as_of_date} | target={window.target_start_date} ~ {window.target_end_date}"
     )
 
+    previous_metadata = read_json(metadata_path) if resume else {}
+    will_skip_prediction = (
+        resume
+        and not rerun_predictions
+        and prediction_path.exists()
+        and prediction_scores_path.exists()
+    )
+    validate_resume_window(
+        window_dir=window_dir,
+        window=window,
+        previous_metadata=previous_metadata,
+        existing_row=existing_row,
+        requires_existing_metadata=will_skip_prediction,
+    )
+
     train_data_path, target_data_path = write_window_data(full_df, window, window_dir)
     source_entries = []
     source_run_entries = []
@@ -903,27 +1072,22 @@ def run_ensemble_window(
         )
         source_score_paths.append((label, source_scores_path))
 
-    write_json(
-        metadata_path,
-        {
-            "version": version,
-            "window": build_window_metadata(window, trading_dates),
-            "train_data": str(train_data_path.relative_to(REPO_ROOT)),
-            "target_data": str(target_data_path.relative_to(REPO_ROOT)),
-            "ensemble_sources": source_entries,
-            "prediction": str(prediction_path.relative_to(REPO_ROOT)),
-            "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
-            "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
-            "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
-            "score": str(score_path.relative_to(REPO_ROOT)),
-        },
-    )
+    window_metadata = {
+        "version": version,
+        "window": build_window_metadata(window, trading_dates),
+        "train_data": str(train_data_path.relative_to(REPO_ROOT)),
+        "target_data": str(target_data_path.relative_to(REPO_ROOT)),
+        "ensemble_sources": source_entries,
+        "prediction": str(prediction_path.relative_to(REPO_ROOT)),
+        "prediction_scores": str(prediction_scores_path.relative_to(REPO_ROOT)),
+        "prediction_diagnostics": str(prediction_diagnostics_path.relative_to(REPO_ROOT)),
+        "prediction_diagnostics_summary": str(prediction_diagnostics_summary_path.relative_to(REPO_ROOT)),
+        "score": str(score_path.relative_to(REPO_ROOT)),
+    }
+    write_json(metadata_path, window_metadata)
 
     should_predict_sources = not (
-        resume
-        and not rerun_predictions
-        and prediction_path.exists()
-        and prediction_scores_path.exists()
+        will_skip_prediction
         and all(path.exists() for _, path in source_score_paths)
     )
     if should_predict_sources:
@@ -1037,7 +1201,7 @@ def run_final(
     if reused_model_dir:
         logger.info("复用最终模型，跳过训练: %s", display_path(reused_model_dir))
         train_seconds = 0.0
-    elif resume and (model_dir / "best_model.pth").exists():
+    elif resume and model_artifacts_exist(model_dir):
         logger.info("最终模型已存在，跳过训练")
     else:
         logger.info("训练最终模型: %s", model_dir)
@@ -1352,6 +1516,15 @@ def main() -> None:
         raise ValueError("BDC_ENSEMBLE_SOURCES 与 --reuse-models-from 不能同时使用")
     existing_summary = read_existing_summary(experiment_dir) if args.resume else {}
     previous_manifest = read_json(experiment_dir / "manifest.json") if args.resume else {}
+    data_signature = build_data_signature(full_df, dates)
+    if args.resume:
+        validate_resume_experiment(
+            experiment_dir=experiment_dir,
+            previous_manifest=previous_manifest,
+            tune_env=tune_env,
+            windows=windows,
+            data_signature=data_signature,
+        )
     git_info = get_git_info()
     manifest = {
         "version": args.version,
@@ -1359,6 +1532,7 @@ def main() -> None:
         "repo_root": str(REPO_ROOT),
         "git": git_info,
         "data_file": str(Path(data_file).resolve()),
+        "data_signature": data_signature,
         "reuse_models_from": display_path(source_experiment_dir) if source_experiment_dir else None,
         "ensemble_sources": [display_path(path) for path in ensemble_source_dirs],
         "tune_env": tune_env,

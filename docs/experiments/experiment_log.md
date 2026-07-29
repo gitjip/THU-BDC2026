@@ -25,6 +25,7 @@
 - `v1.6.1` `noid-rank-multiperiod` 24 窗口明显变差：追加 3/5/10/20/40 日多周期基础特征后均值为负，排序诊断也变差，不应继续扩跑或升默认。
 - topK/现金仓位离线复盘不支持改默认：`v1.4.5 rank-replace` 中 top3 满仓均值最高，但 top5 满仓的波动更低、正分窗口更多、均值/波动比更好；固定降仓只会线性缩放收益和亏损。
 - `v1.6.2` 准备测试 `noid-rank-breadth`：在 `rank-replace` 上只追加 1 个市场宽度特征 `mkt_breadth_5`，先跑 3 窗口，未接近主对照则止损。
+- `v1.6.3` 修复 `--resume` 安全性：跳过训练/预测前会校验旧 manifest、窗口 metadata 和 summary 日期，避免更新 `stock_data` 后按 `window_01` 误复用旧模型。
 
 ## 版本记录
 

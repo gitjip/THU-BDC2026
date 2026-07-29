@@ -130,6 +130,8 @@ sh tune.sh quick --skip-final --resume
 - `prediction_diagnostics_summary.csv` 的 topK 后验收益和模型分数/真实收益相关性；
 - `prediction_repeated_stocks.csv` 中 top20/top50 是否仍长期重复。
 
+`--resume` 只用于同一份 `stock_data`、同一批窗口日期、同一套关键 `BDC_*` 配置下的中断续跑。流程会校验旧 `manifest.json`、窗口 `metadata.json` 和 `summary.csv`，如果数据范围、窗口日期或关键调参配置不一致会直接中止。更新 `stock_data`、调整 `--windows/--step-days` 或切换 profile 时，请使用新的语义化版本号。
+
 ## 6. 正式调参运行
 
 默认跑 `balanced`，并在最后训练一次最终模型、生成最终预测：
