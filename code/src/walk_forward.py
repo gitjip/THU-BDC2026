@@ -86,6 +86,7 @@ NOTE_CONFIG_KEYS = [
 ]
 
 RESUME_IGNORED_TUNE_ENV_KEYS = {
+    "BDC_WF_WINDOWS",
     "BDC_NUM_PROCESSES",
     "BDC_TORCH_NUM_THREADS",
     "BDC_TENSORBOARD",
@@ -442,10 +443,14 @@ def read_existing_summary(experiment_dir: Path) -> dict[str, dict]:
     summary = pd.read_csv(summary_path)
     if "window" not in summary.columns:
         return {}
-    return {
-        str(row["window"]): row.to_dict()
-        for _, row in summary.iterrows()
-    }
+    rows = {}
+    for _, row in summary.iterrows():
+        row_dict = row.to_dict()
+        rows[str(row_dict["window"])] = row_dict
+        key = row_identity_key(row_dict)
+        if key:
+            rows[f"date:{key}"] = row_dict
+    return rows
 
 
 def normalize_resume_env_value(key: str, value) -> str:
@@ -478,6 +483,34 @@ def window_identity(window: WalkForwardWindow | dict) -> dict[str, str | list[st
         "as_of_date": str(window.get("as_of_date") or ""),
         "target_dates": format_date_list(window.get("target_dates") or window.get("target_trading_dates") or []),
     }
+
+
+def window_date_identity(window: WalkForwardWindow | dict) -> dict[str, str | list[str]]:
+    identity = window_identity(window)
+    return {
+        "as_of_date": identity["as_of_date"],
+        "target_dates": identity["target_dates"],
+    }
+
+
+def window_identity_key(window: WalkForwardWindow | dict) -> str:
+    identity = window_date_identity(window)
+    return f"{identity['as_of_date']}__{','.join(identity['target_dates'])}"
+
+
+def row_identity_key(row: dict) -> str:
+    as_of_date = str(row.get("as_of_date") or "")
+    target_dates = str(row.get("target_dates") or "")
+    if not as_of_date or not target_dates:
+        return ""
+    parsed_target_dates = [item.strip() for item in target_dates.split(",") if item.strip()]
+    if not parsed_target_dates:
+        return ""
+    return f"{as_of_date}__{','.join(parsed_target_dates)}"
+
+
+def existing_summary_row(existing_summary: dict[str, dict], window: WalkForwardWindow) -> dict | None:
+    return existing_summary.get(window.name) or existing_summary.get(f"date:{window_identity_key(window)}")
 
 
 def build_data_signature(full_df: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
@@ -524,11 +557,64 @@ def validate_resume_window(
         raise ValueError(f"{window_dir} 缺少 metadata.json，不能安全 --resume。请换版本号或清理旧窗口后重跑。")
 
     previous_window = previous_metadata.get("window") or {}
-    if window_identity(previous_window) != window_identity(window):
+    if window_date_identity(previous_window) != window_date_identity(window):
         raise ValueError(
             f"{window_dir} 的 metadata.json 窗口日期与当前窗口不一致，不能安全 --resume。"
             f"旧={window_identity(previous_window)}, 新={window_identity(window)}。请换版本号或清理旧窗口后重跑。"
         )
+
+
+def normalize_resume_window_dirs(experiment_dir: Path, windows: list[WalkForwardWindow]) -> None:
+    windows_dir = experiment_dir / "windows"
+    if not windows_dir.exists():
+        return
+
+    desired_name_by_key = {window_identity_key(window): window.name for window in windows}
+    existing_dir_by_key = {}
+    for child in sorted(windows_dir.iterdir()):
+        if not child.is_dir() or not child.name.startswith("window_"):
+            continue
+        metadata = read_json(child / "metadata.json")
+        previous_window = metadata.get("window") or {}
+        if not previous_window:
+            continue
+        key = window_identity_key(previous_window)
+        if key not in desired_name_by_key:
+            continue
+        if key in existing_dir_by_key:
+            raise ValueError(
+                f"{windows_dir} 中存在重复日期窗口: {existing_dir_by_key[key].name}, {child.name}。请清理后重跑。"
+            )
+        existing_dir_by_key[key] = child
+
+    moves = [
+        (source_dir, windows_dir / desired_name_by_key[key])
+        for key, source_dir in existing_dir_by_key.items()
+        if source_dir.name != desired_name_by_key[key]
+    ]
+    if not moves:
+        return
+
+    source_dirs = {source_dir.resolve() for source_dir, _ in moves}
+    for _, target_dir in moves:
+        if target_dir.exists() and target_dir.resolve() not in source_dirs:
+            raise ValueError(f"无法重排窗口目录，目标目录已存在且不属于可移动旧窗口: {target_dir}")
+
+    temp_dir = windows_dir / ".resume_reindex_tmp"
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+    temp_dir.mkdir(parents=True)
+    staged_moves = []
+    for source_dir, target_dir in moves:
+        staged_dir = temp_dir / source_dir.name
+        shutil.move(str(source_dir), str(staged_dir))
+        staged_moves.append((staged_dir, target_dir))
+
+    for staged_dir, target_dir in staged_moves:
+        shutil.move(str(staged_dir), str(target_dir))
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    logger.info("已按窗口日期重排已有目录，便于增量扩跑: %s 个窗口", len(moves))
 
 
 def validate_resume_experiment(
@@ -550,12 +636,18 @@ def validate_resume_experiment(
             f"旧={previous_signature}, 新={data_signature}。请换版本号重新跑。"
         )
 
-    previous_windows = [window_identity(item) for item in previous_manifest.get("windows") or []]
-    current_windows = [window_identity(window) for window in windows]
-    if previous_windows and previous_windows != current_windows:
+    previous_windows = [window_date_identity(item) for item in previous_manifest.get("windows") or []]
+    previous_window_keys = {window_identity_key(item) for item in previous_manifest.get("windows") or []}
+    current_window_keys = {window_identity_key(window) for window in windows}
+    if previous_windows and previous_window_keys - current_window_keys:
+        missing = [
+            item
+            for item in previous_windows
+            if window_identity_key(item) not in current_window_keys
+        ]
         raise ValueError(
-            "当前 walk-forward 窗口日期与旧 manifest 不一致，不能安全 --resume。"
-            f"旧={previous_windows}, 新={current_windows}。请换版本号重新跑。"
+            "当前 walk-forward 窗口不包含旧 manifest 中的全部日期，不能安全 --resume。"
+            f"缺失旧窗口={missing}。请换版本号重新跑。"
         )
 
     previous_env = resume_tune_env(previous_manifest.get("tune_env") or {})
@@ -1522,7 +1614,6 @@ def main() -> None:
     source_experiment_dir = resolve_experiment_ref(args.reuse_models_from)
     if ensemble_source_dirs and source_experiment_dir:
         raise ValueError("BDC_ENSEMBLE_SOURCES 与 --reuse-models-from 不能同时使用")
-    existing_summary = read_existing_summary(experiment_dir) if args.resume else {}
     previous_manifest = read_json(experiment_dir / "manifest.json") if args.resume else {}
     data_signature = build_data_signature(full_df, dates)
     if args.resume:
@@ -1533,6 +1624,8 @@ def main() -> None:
             windows=windows,
             data_signature=data_signature,
         )
+        normalize_resume_window_dirs(experiment_dir, windows)
+    existing_summary = read_existing_summary(experiment_dir) if args.resume else {}
     git_info = get_git_info()
     manifest = {
         "version": args.version,
@@ -1565,7 +1658,7 @@ def main() -> None:
                     source_experiment_dirs=ensemble_source_dirs,
                     resume=args.resume,
                     rerun_predictions=args.rerun_predictions,
-                    existing_row=existing_summary.get(window.name),
+                    existing_row=existing_summary_row(existing_summary, window),
                 )
             )
         else:
@@ -1579,7 +1672,7 @@ def main() -> None:
                     resume=args.resume,
                     rerun_predictions=args.rerun_predictions,
                     source_experiment_dir=source_experiment_dir,
-                    existing_row=existing_summary.get(window.name),
+                    existing_row=existing_summary_row(existing_summary, window),
                 )
             )
         write_summary(experiment_dir, rows)

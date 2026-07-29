@@ -138,7 +138,7 @@ sh tune.sh quick --skip-final --resume
 - `prediction_diagnostics_summary.csv` 的 topK 后验收益和模型分数/真实收益相关性；
 - `prediction_repeated_stocks.csv` 中 top20/top50 是否仍长期重复。
 
-`--resume` 只用于同一份 `stock_data`、同一批窗口日期、同一套关键 `BDC_*` 配置下的中断续跑。流程会校验旧 `manifest.json`、窗口 `metadata.json` 和 `summary.csv`，如果数据范围、窗口日期或关键调参配置不一致会直接中止。更新 `stock_data`、调整 `--windows/--step-days` 或切换 profile 时，请使用新的语义化版本号。
+`--resume` 用于同一份 `stock_data`、同一套关键 `BDC_*` 配置下的中断续跑，也支持只增大 `--windows` 做增量扩跑。流程会按窗口日期校验旧 `manifest.json`、窗口 `metadata.json` 和 `summary.csv`；如果把 6 窗口扩到 12 窗口，旧的最近 6 个窗口会自动重排到新的 `window_07` 到 `window_12`，只训练新增的更早 6 个窗口。更新 `stock_data`、调整 `--step-days` 或切换 profile 时，请使用新的语义化版本号。
 
 ## 6. 正式调参运行
 
@@ -172,13 +172,15 @@ sh tune.sh v1.2.0 large --windows 3
 sh tune.sh v1.2.0 full --windows 3
 ```
 
-新特征建议使用连续版本号分级跑：
+新特征建议用同一版本号分级增量扩跑：
 
 ```bash
-sh tune.sh v1.7.0 <profile> --windows 6 --skip-final
-sh tune.sh v1.7.1 <profile> --windows 12 --skip-final
-sh tune.sh v1.7.2 <profile> --windows 24 --skip-final
+sh tune.sh v1.8.0 <profile> --windows 6 --skip-final
+sh tune.sh v1.8.0 <profile> --windows 12 --skip-final --resume
+sh tune.sh v1.8.0 <profile> --windows 24 --skip-final --resume
 ```
+
+如果 6 窗口明显弱于主对照，停止扩跑并记录；如果不差，再进入 12 窗口。增量扩跑只适用于单纯增加窗口数，不要在同一版本中同时改 profile、数据或其他训练参数。
 
 已有实验补完预测诊断后，可以比较候选池：
 
@@ -279,7 +281,7 @@ BDC_ENSEMBLE_SOURCES=v1.4.7,v1.4.5 sh tune.sh v1.4.8 ensemble-lowvol --windows 2
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 
-`manifest.json` 中 `tune_env` 记录的是 profile 写入的环境变量；如果命令行传了 `--windows 12` 这类参数，实际生效值看 `walk_forward_args` 和 `windows` 列表。`summary.csv` 中的行数也是实际完成窗口数。
+`manifest.json` 中 `tune_env` 会记录当前 profile 和脚本同步后的关键环境变量；实际窗口计划以 `walk_forward_args` 和 `windows` 列表为准。`summary.csv` 中的行数也是实际完成窗口数。
 
 默认不覆盖正式提交文件。最终预测会保存在：
 

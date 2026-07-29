@@ -231,7 +231,7 @@ ret5_rank_minus_ret20_rank = ret5_rank - ret20_rank
 
 当前结论：`ret5_rank_minus_ret20_rank` 当前实现未通过，不扩 12/24 窗口。横截面 rank 小信号方向不完全否定，但下一步应避免单纯追逐短期加速。
 
-## 9. 风险调整短期动量 rank 差（待测）
+## 9. 风险调整短期动量 rank 差（未通过）
 
 `v1.8.0 noid-rank-riskadj` 仍回到当前主候选 `noid-rank-replace`，只追加 1 个横截面风险调整信号：
 
@@ -251,20 +251,23 @@ ret5_rank_minus_vol20_rank = ret5_rank - vol20_rank
 - 值为负：短期收益排名不高，或主要来自高波动噪声；
 - 相比 `ret5_rank_minus_ret20_rank`，它不再追逐短期对中期的加速，而是给模型一个“短期强、但不是纯高波动”的排序线索。
 
-它只使用当前日期及之前的收益和波动，不看未来目标窗口；输入维度只增加 1 列，继续按 `6 -> 12 -> 24` 分级验证。
+它只使用当前日期及之前的收益和波动，不看未来目标窗口；输入维度只增加 1 列。
 
-推荐第一步：
+`v1.8.0 noid-rank-riskadj` 已跑 6 窗口，结果偏弱：
 
-```bash
-sh tune.sh v1.8.0 noid-rank-riskadj --windows 6 --skip-final
-```
+- 6 窗口均值约 `-0.019067`；
+- 与相同日期的 `v1.4.5 noid-rank-replace` 对比，平均低约 `0.037624`；
+- 只在 `2/6` 个窗口胜过同日期 `rank-replace`；
+- 最差窗口约 `-0.121555`，说明它没有解决近期极端坏窗口问题。
+
+当前结论：`ret5_rank_minus_vol20_rank` 当前实现未通过，不建议扩 12/24 窗口。它比 `momdelta` 稍好，但仍没有接近主对照。
 
 ## 10. 下一步特征方向
 
 优先级建议：
 
 1. 把 `noid-rank-replace` 作为当前最强单模型候选，同时保留 `noid` 作为对照基线。
-2. 下一步优先按 6 窗口测试 `v1.8.0 noid-rank-riskadj`。
+2. 暂停 `v1.8.0 noid-rank-riskadj`，不要扩 12/24 窗口。
 3. 暂停 `v1.7.0 noid-rank-momdelta`，不要扩 12/24 窗口。
 4. 暂停 `v1.6.2 noid-rank-breadth` 单列市场宽度实现，不扩 12/24 窗口。
 5. 暂停 `v1.6.1 noid-rank-multiperiod`，不要继续扩跑。
