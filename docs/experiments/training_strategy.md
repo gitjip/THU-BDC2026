@@ -233,7 +233,7 @@ sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 
 `v1.4.9 noid-rank-trendq` 追加趋势质量特征后，最新 3 窗口均值约 `-0.067912`，相对同日期 `v1.4.5 rank-replace` 平均低约 `0.048780`，且 3 个窗口都未胜出。这个结果更像特征噪声或重复信号，不像训练过程欠优化；不建议用更多 epoch 或更大模型去补救这组特征。
 
-`v1.9.0 noid-rank-ret5rank` 是下一轮更小步的横截面信号：只在 `noid-rank-replace` 上追加 `return_5_cs_rank`，用于判断前两个 rank 差信号失败是否来自组合方式，而不是 5 日收益横截面位置本身。
+`v1.9.0 noid-rank-ret5rank` 已跑 6 窗口，均值约 `-0.049961`，相同日期 `0/6` 胜过 `rank-replace`。它说明前两个 rank 差信号失败不只是组合方式问题，单独的短期收益 rank 也会强化固定坏股池；训练过程暂时不是这条线的主要瓶颈。
 
 ## 12. v1.5.0 排序监督信号实验
 

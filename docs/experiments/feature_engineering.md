@@ -262,7 +262,7 @@ ret5_rank_minus_vol20_rank = ret5_rank - vol20_rank
 
 当前结论：`ret5_rank_minus_vol20_rank` 当前实现未通过，不建议扩 12/24 窗口。它比 `momdelta` 稍好，但仍没有接近主对照。
 
-## 10. return_5 单列横截面 rank（待测）
+## 10. return_5 单列横截面 rank（未通过）
 
 `v1.9.0 noid-rank-ret5rank` 继续回到当前主候选 `noid-rank-replace`，只追加 1 个最小短期相对强弱信号：
 
@@ -286,14 +286,23 @@ return_5_cs_rank = 当日 return_5 在全市场中的百分位排名
 sh tune.sh v1.9.0 noid-rank-ret5rank --windows 6 --skip-final
 ```
 
-验收时优先比较同日期 `v1.4.5 noid-rank-replace`：6 窗口均值、最差窗口、胜出窗口数、Spearman、top20/top50 后验收益。如果明显变差，结论仍写成“当前实现未通过”，不要把整个横截面小信号方向永久否定。
+`v1.9.0 noid-rank-ret5rank` 已跑 6 窗口，结果明显变差：
+
+- 6 窗口均值约 `-0.049961`；
+- 与相同日期的 `v1.4.5 noid-rank-replace` 对比，平均低约 `0.068518`；
+- `0/6` 个窗口胜过同日期 `rank-replace`；
+- 最差窗口约 `-0.125743`，只略好于 `cleanrisk` 的极差窗口，明显差于 `rank-replace` 的 `-0.066987`；
+- 平均 Spearman 约 `-0.095215`，top20 后验收益约 `-0.018190`，真实 top5 落入模型 top20 的总命中数只有 `3`；
+- `002384`、`603986` 连续 6 个窗口都被选中，且平均后验收益为负，固定坏股池问题没有改善。
+
+当前结论：`return_5_cs_rank` 当前实现未通过，不扩 12/24 窗口。它比 `momdelta` 和 `riskadj` 都更差，说明问题不只是“rank 差值组合方式”，而是短期收益 rank 本身可能在这段数据里强化了近期过热或固定股票池。
 
 ## 11. 下一步特征方向
 
 优先级建议：
 
 1. 把 `noid-rank-replace` 作为当前最强单模型候选，同时保留 `noid` 作为对照基线。
-2. 先测 `v1.9.0 noid-rank-ret5rank`，因为它比前两个 rank 差信号更小、更容易解释。
+2. 暂停 `v1.9.0 noid-rank-ret5rank`，不要扩 12/24 窗口。
 3. 暂停 `v1.8.0 noid-rank-riskadj`，不要扩 12/24 窗口。
 4. 暂停 `v1.7.0 noid-rank-momdelta`，不要扩 12/24 窗口。
 5. 暂停 `v1.6.2 noid-rank-breadth` 单列市场宽度实现，不扩 12/24 窗口。
