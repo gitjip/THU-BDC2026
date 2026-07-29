@@ -459,7 +459,63 @@ experiments/analysis/high_score_good_bad_v1.4.5/
 - `drawdown` 单独看不可靠，当前高分好股的回撤 rank 反而略高，不能直接做硬过滤；
 - 重复坏股表只能用于诊断，不应硬编码排除股票代码。
 
-## 11. 固定选股池的优先嫌疑
+`v1.10.0 noid-rank-overheatguard` 把短期过热保护做成训练输入后，6 窗口明显变差，说明这条线索不适合直接塞进 Transformer 特征。更稳妥的下一步是把它作为预测后的二阶段校准信号，只在模型已经给出的高分候选池内做轻微重排或过滤。
+
+## 11. 二阶段后处理离线评估
+
+从 `v1.11.0` 开始，可以用独立脚本复用已有 walk-forward 预测结果，评估后处理规则，不重训模型、不重跑预测、不改提交文件：
+
+```bash
+.venv/bin/python code/src/evaluate_stage2_postprocess.py experiments/v1.4.5 --output-dir experiments/analysis/stage2_postprocess_v1.4.5
+```
+
+默认输出：
+
+```text
+experiments/analysis/stage2_postprocess_<version>/
+```
+
+主要文件：
+
+- `summary.csv`：每条规则的跨窗口均值、最差窗口、标准差、正分窗口、相对原始 top5 的胜负窗口；
+- `window_scores.csv`：每个窗口、每条规则的入选股票和后验得分；
+- `candidate_scores.csv`：每条规则候选池内每只股票的原始 rank、历史信号、是否入选和未来收益；
+- `paired_vs_baseline.csv`：逐窗口对比原始 top5；
+- `diagnostic_summary.csv`：原始 top5 的窗口级基础诊断；
+- `readme.md`：中文结论，直接说明是否值得接入正式预测。
+
+当前默认规则只在模型 top10/top20 内试算，最终仍选 top5 等权满仓。信号包括：
+
+- `ret3_rank`：预测日前 3 日收益横截面分位；
+- `gap5ma_rank`：预测日收盘价相对 5 日均线偏离的横截面分位；
+- `short_overheat_rank`：`ret3_rank` 与 `gap5ma_rank` 的较大值；
+- `intraday_range_rank`：近 5 日日内振幅横截面分位；
+- `volatility_20_rank`：近 20 日收益波动横截面分位。
+
+软惩罚规则形式为：
+
+```text
+adjusted_rank = rank + a * short_overheat_rank + b * volatility_20_rank + c * intraday_range_rank
+```
+
+其中 `a in {2,4,6,8}`，`b in {0,2}`，`c in {0,2}`。脚本还会参考硬过滤 `short_overheat_rank >= 0.85/0.90`，不足 5 只时按原始 rank 补齐。
+
+验收标准仍要严格：
+
+- 最佳规则 24 窗口均值要高于原始 top5；
+- 最差窗口不能更差；
+- 正分窗口数不能减少；
+- 改善不能只靠 1 到 2 个窗口拉高；
+- 如果不通过，只记录失败，不接入 `BDC_SELECTION_STRATEGY`。
+
+`v1.11.0` 已跑两组离线评估：
+
+- `v1.4.5 rank-replace`：最佳规则 `drop_short_overheat_pool10_ge_0p85`，均值从 `0.017557` 提到 `0.019198`，正分窗口从 `14/24` 到 `16/24`，但最差窗口从 `-0.066987` 恶化到 `-0.081465`，没有通过接入标准；
+- `v1.4.7 noid`：最佳规则 `drop_short_overheat_pool20_ge_0p85`，均值从 `0.002716` 到 `0.006863`，最差窗口从 `-0.127667` 到 `-0.116707`，正分窗口从 `11/24` 到 `14/24`，说明它对较弱 noid 有防守价值。
+
+当前判断：短期过热硬过滤不是当前默认 `rank-replace` 的合格提交后处理；它可以作为 noid 或多模型候选池的诊断候选，但不要直接改 `train.sh/test.sh` 默认策略。
+
+## 12. 固定选股池的优先嫌疑
 
 早期 39 特征配置默认包含 `instrument`。它是股票代码映射后的整数索引，不是真正的行业、风格或基本面特征。模型把它当连续数值输入时，可能学到“某些编号长期更该被选”的身份偏好。当前默认提交配置已经移除 `instrument`，这里保留的是历史判断依据。
 
@@ -479,7 +535,7 @@ sh tune.sh v1.2.8 noid --skip-final
 
 `noid` 只是不把 `instrument` 输入模型。股票代码仍用于数据分组、序列构造、打分和输出，不会影响提交文件格式。
 
-## 12. v1.2.8 noid 后续
+## 13. v1.2.8 noid 后续
 
 `v1.2.8 noid` 的多窗口均值改善，说明移除 `instrument` 是值得继续观察的方向。但完整排名也显示，模型更容易选到高波动股票，第二个窗口表现明显拖累均值。
 
@@ -496,7 +552,7 @@ sh tune.sh v1.2.9 noid-stable --skip-final
 - top5 是否继续集中在高波动股票；
 - `prediction_scores.csv` 中入选股票和未入选股票的 `pred_score` 差距是否过大。
 
-## 13. resume 产物注意
+## 14. resume 产物注意
 
 早期版本用 `--resume` 补预测诊断文件时，可能会把 `summary.csv` 中已有训练耗时覆盖为空。后续流程会尽量从旧 `summary.csv` 和 `manifest.json` 保留已有耗时。
 
