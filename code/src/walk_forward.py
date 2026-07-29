@@ -39,6 +39,7 @@ PROFILE_DESCRIPTIONS = {
     "noid-rank-breadth": "noid + 横截面 rank 替代 + 市场宽度特征，用于测试市场环境信号。",
     "noid-rank-marketenv": "noid + 横截面 rank 替代 + 当日市场环境特征，用于测试普涨普跌和市场波动状态。",
     "noid-rank-marketenv-lite": "noid + 横截面 rank 替代 + 精简市场环境特征，只测试市场收益均值和上涨比例。",
+    "noid-rank-marketenv-roll": "noid + 横截面 rank 替代 + 滚动滞后市场环境特征，只测试过去 5 日市场状态。",
     "noid-rank-momdelta": "noid + 横截面 rank 替代 + 短中期动量 rank 差，用于测试横截面动量变化信号。",
     "noid-rank-riskadj": "noid + 横截面 rank 替代 + 风险调整短期动量 rank 差，用于测试高收益但非高波动的相对强度信号。",
     "noid-rank-ret5rank": "noid + 横截面 rank 替代 + return_5 单列横截面 rank，用于测试最小短期相对强弱信号。",

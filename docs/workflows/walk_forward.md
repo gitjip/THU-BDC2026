@@ -67,6 +67,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-rank-breadth` | rank替代+市场宽度 | 3 | 38(no instrument, rank replace)+1 breadth=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-marketenv` | rank替代+市场环境状态 | 6 | 38(no instrument, rank replace)+5 marketenv=43 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-marketenv-lite` | rank替代+精简市场环境 | 6 | 38(no instrument, rank replace)+2 marketenv=40 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-marketenv-roll` | rank替代+滚动滞后市场状态 | 6 | 38(no instrument, rank replace)+2 marketenv=40 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-momdelta` | rank替代+短中期动量rank差 | 6 | 38(no instrument, rank replace)+1 momdelta=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-riskadj` | rank替代+风险调整短期动量rank差 | 6 | 38(no instrument, rank replace)+1 riskadj=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-ret5rank` | rank替代+return_5单列rank | 6 | 38(no instrument, rank replace)+1 ret5rank=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
@@ -80,7 +81,7 @@ sh tune.sh quick --skip-final --resume
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-rank-breadth`、`noid-rank-marketenv`、`noid-rank-marketenv-lite`、`noid-rank-momdelta`、`noid-rank-riskadj`、`noid-rank-ret5rank`、`noid-rank-overheatguard`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-rank-breadth`、`noid-rank-marketenv`、`noid-rank-marketenv-lite`、`noid-rank-marketenv-roll`、`noid-rank-momdelta`、`noid-rank-riskadj`、`noid-rank-ret5rank`、`noid-rank-overheatguard`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
 
 `noid` 源自 `balanced` 小模型配置，但当前属于主线对照档：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`，并使用 30 epoch 上限。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。如果要重新严格比较是否保留 `instrument`，应给 `balanced` 显式设置相同 epoch 上限。
 
@@ -107,6 +108,8 @@ sh tune.sh quick --skip-final --resume
 `noid-rank-marketenv` 基于 `noid-rank-replace`，追加 5 个当日市场环境状态特征：`market_return_mean`、`market_return_std`、`up_ratio`、`market_volatility_mean`、`market_turnover_median`。它不同于 `noid-marketrel` 的逐股相对市场强干预，也不同于单列 `mkt_breadth_5`；本轮目标是让模型知道当前是普涨、普跌、震荡、高波动还是流动性变化。`v1.11.1` 已跑 6 窗口且明显变差，不扩 12/24；但这只否定当前 5 列直接追加表达，不直接否定市场环境方向。
 
 `noid-rank-marketenv-lite` 是 `noid-rank-marketenv` 的拆小版，只追加 `market_return_mean` 和 `up_ratio` 两列，先验证普涨/普跌背景本身是否有用。`v1.11.2` 已跑 6 窗口，均值仍明显低于同日期 `rank-replace`；这个 profile 保留用于复现，不建议扩 12/24。后续若继续市场环境方向，应另做滚动/滞后市场状态。
+
+`noid-rank-marketenv-roll` 继续拆小市场环境方向，只追加 `mkt_ret_mean_5_lag1` 和 `mkt_up_ratio_5_lag1` 两列：先计算每日市场收益均值和上涨比例，再滞后 1 个交易日并取过去 5 个交易日均值。`v1.11.3` 已跑 6 窗口，仍明显弱于同日期 `rank-replace`；这个 profile 保留用于复现，不建议扩 12/24。
 
 `noid-rank-momdelta` 基于 `noid-rank-replace`，只追加 1 个短中期动量 rank 差信号 `ret5_rank_minus_ret20_rank`：当日 `return_5` 横截面百分位排名减去过去 20 日收益横截面百分位排名。它用于测试“短期相对强度是否高于中期相对强度”这类更贴近横截面排序的小信号，默认先跑 6 窗口。
 
@@ -177,6 +180,7 @@ sh tune.sh v1.6.1 noid-rank-multiperiod --windows 3 --skip-final
 sh tune.sh v1.6.2 noid-rank-breadth --windows 3 --skip-final
 sh tune.sh v1.11.1 noid-rank-marketenv --windows 6 --skip-final
 sh tune.sh v1.11.2 noid-rank-marketenv-lite --windows 6 --skip-final
+sh tune.sh v1.11.3 noid-rank-marketenv-roll --windows 6 --skip-final
 sh tune.sh v1.7.0 noid-rank-momdelta --windows 6 --skip-final
 sh tune.sh v1.8.0 noid-rank-riskadj --windows 6 --skip-final
 sh tune.sh v1.2.9 noid-stable --skip-final

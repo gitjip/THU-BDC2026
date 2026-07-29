@@ -97,9 +97,15 @@ MARKET_ENV_LITE_FEATURE_COLUMNS = [
     'up_ratio',
 ]
 
+MARKET_ENV_ROLLING_FEATURE_COLUMNS = [
+    'mkt_ret_mean_5_lag1',
+    'mkt_up_ratio_5_lag1',
+]
+
 MARKET_ENV_FEATURE_COLUMN_SETS = {
     'full': MARKET_ENV_FEATURE_COLUMNS,
     'lite': MARKET_ENV_LITE_FEATURE_COLUMNS,
+    'rolling': MARKET_ENV_ROLLING_FEATURE_COLUMNS,
 }
 
 RANK_MOMENTUM_FEATURE_COLUMNS = [
@@ -339,6 +345,9 @@ def add_market_env_features(df, feature_set='full'):
     """Add per-date market state features shared by all stocks on that date."""
     feature_set = (feature_set or 'full').strip().lower()
     selected_columns = market_env_feature_names(feature_set)
+    all_columns = list(
+        dict.fromkeys(MARKET_ENV_FEATURE_COLUMNS + MARKET_ENV_ROLLING_FEATURE_COLUMNS)
+    )
     required_columns = {'日期', 'return_1'}
     if feature_set == 'full':
         required_columns.update({'volatility_20', '换手率'})
@@ -378,13 +387,19 @@ def add_market_env_features(df, feature_set='full'):
             market_volatility_mean=('volatility_20', 'mean'),
             market_turnover_median=('turnover', 'median'),
         )
-        for column in MARKET_ENV_FEATURE_COLUMNS:
+        market['mkt_ret_mean_5_lag1'] = (
+            market['market_return_mean'].shift(1).rolling(5, min_periods=1).mean()
+        )
+        market['mkt_up_ratio_5_lag1'] = (
+            market['up_ratio'].shift(1).rolling(5, min_periods=1).mean()
+        )
+        for column in all_columns:
             result[column] = dates.map(market[column])
     else:
-        for column in MARKET_ENV_FEATURE_COLUMNS:
+        for column in all_columns:
             result[column] = 0.0
 
-    for column in MARKET_ENV_FEATURE_COLUMNS:
+    for column in all_columns:
         result[column] = (
             pd.to_numeric(result[column], errors='coerce')
             .replace([np.inf, -np.inf], np.nan)
@@ -392,6 +407,10 @@ def add_market_env_features(df, feature_set='full'):
             .astype(float)
         )
     result['up_ratio'] = result['up_ratio'].clip(lower=0.0, upper=1.0)
+    result['mkt_up_ratio_5_lag1'] = result['mkt_up_ratio_5_lag1'].clip(
+        lower=0.0,
+        upper=1.0,
+    )
     return result, selected_columns
 
 

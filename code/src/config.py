@@ -32,7 +32,7 @@ use_market_env_features = _env_bool("BDC_USE_MARKET_ENV_FEATURES", False)
 market_env_feature_set = os.environ.get("BDC_MARKET_ENV_FEATURE_SET", "full").strip().lower()
 if market_env_feature_set in {"", "default"}:
     market_env_feature_set = "full"
-if market_env_feature_set not in {"full", "lite"}:
+if market_env_feature_set not in {"full", "lite", "rolling"}:
     raise ValueError(f"Unsupported BDC_MARKET_ENV_FEATURE_SET: {market_env_feature_set}")
 use_rank_momentum_features = _env_bool("BDC_USE_RANK_MOMENTUM_FEATURES", False)
 use_rank_riskadj_features = _env_bool("BDC_USE_RANK_RISKADJ_FEATURES", False)
