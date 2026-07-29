@@ -124,7 +124,7 @@ Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top
 
 当前结论：`v1.3.3` 和 `v1.3.4` 都没有显示出继续细分相对特征的价值。后续 24 窗口复核后，主提交配置已改为 `noid-rank-replace`；不要把 rank-lite 或 marketrel 升为默认。
 
-`v1.6.0 noid-rank-cleanrisk` 已跑完 24 窗口，均值和最差窗口都明显变差，说明清洗启发的流动性/回撤风险特征这条线暂时不值得继续。`v1.6.1 noid-rank-multiperiod` 也在 24 窗口明显变差，均值约 `-0.012037`，相对 `v1.4.5 rank-replace` 只在 `5/24` 个窗口胜出。当前不要继续做成组基础特征追加；如果继续做特征，只测试 `v1.6.2 noid-rank-breadth` 这种单个市场环境信号。默认策略仍保持 `noid-rank-replace`。
+`v1.6.0 noid-rank-cleanrisk` 已跑完 24 窗口，均值和最差窗口都明显变差，说明这组清洗启发的流动性/回撤风险特征当前实现未通过。`v1.6.1 noid-rank-multiperiod` 也在 24 窗口明显变差，均值约 `-0.012037`，相对 `v1.4.5 rank-replace` 只在 `5/24` 个窗口胜出。`v1.6.2 noid-rank-breadth` 已跑 6 窗口并明显变差，单列市场宽度暂不扩跑。后续新方向按 [实验纪律与分级验证](experiment_protocol.md) 走 `6 -> 12 -> 24`，默认策略仍保持 `noid-rank-replace`。
 
 ## 10. 当前策略
 
@@ -252,7 +252,7 @@ sh tune.sh v1.5.0 noid-rank-sharp --windows 3 --skip-final
 - `prediction_diagnostics_summary.csv` 中 top20/top50 后验收益和 Spearman 是否改善；
 - `training_history.csv` 是否出现更快过拟合，例如最佳 epoch 过早且后续 eval loss 急升。
 
-如果 3 窗口明显弱于 `rank-replace`，不要扩到 24 窗口；这说明更尖锐的监督信号可能只是在放大金融噪声。
+如果 6 窗口明显弱于 `rank-replace`，不要扩到 12/24 窗口；这说明当前实现可能只是在放大金融噪声。但结论应写成“当前实现未通过”，不是永久否定整个方向。
 
 `v1.5.0 noid-rank-sharp` 已完成最近 3 窗口短测，结果不通过：
 

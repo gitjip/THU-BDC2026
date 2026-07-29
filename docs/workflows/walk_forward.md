@@ -86,13 +86,13 @@ sh tune.sh quick --skip-final --resume
 
 `noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。`v1.4.7/8` 公平预算复核后，它是当前最强单模型候选，也是默认提交配置。
 
-`noid-rank-sharp` 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`。它不改特征、不改模型、不改训练预算，目的是让 listwise loss 中的真实收益分布不再接近均匀，从而强化“真实高收益股票应排到前面”的监督信号。它应先跑最近 3 窗口；如果均值、最差窗口、top20/top50 后验收益没有接近或超过 `noid-rank-replace`，不要扩到 24 窗口。
+`noid-rank-sharp` 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`。它不改特征、不改模型、不改训练预算，目的是让 listwise loss 中的真实收益分布不再接近均匀，从而强化“真实高收益股票应排到前面”的监督信号。新实现应先跑 6 窗口探索；如果均值、最差窗口、top20/top50 后验收益没有接近或超过 `noid-rank-replace`，不要扩到 12/24 窗口。
 
 `v1.5.0 noid-rank-sharp` 的 3 窗口短测已经跑完，均值约 `-0.024860`，3/3 个窗口都没有胜出，说明这条线暂时不值得扩跑。
 
 `noid-rank-trendq` 基于 `noid-rank-replace`，追加 5 个趋势质量特征：波动调整动量、20 日区间位置、20 日回撤和 10 日上涨占比。它用于测试“上涨质量”能否改善 rank-replace 的 top20/top50 排序，不改变模型结构。`v1.4.9` 最新 3 窗口短测均值约 `-0.067912`，相对同日期 `v1.4.5 noid-rank-replace` 平均低约 `0.048780`，不建议扩跑。
 
-`noid-rank-cleanrisk` 基于 `noid-rank-replace`，追加 6 个清洗启发的风险特征：当前无成交标记、5/20 日无成交比例、成交额/换手率 20 日 z-score 和 20 日回撤。它用于测试停牌、无成交、流动性突然枯竭和明显回撤是否能改善源模型排序信号。先跑最近 3 窗口，未通过就不要扩跑。
+`noid-rank-cleanrisk` 基于 `noid-rank-replace`，追加 6 个清洗启发的风险特征：当前无成交标记、5/20 日无成交比例、成交额/换手率 20 日 z-score 和 20 日回撤。它用于测试停牌、无成交、流动性突然枯竭和明显回撤是否能改善源模型排序信号。新实现应先跑 6 窗口探索，未通过就不要扩跑。
 
 `noid-rank-multiperiod` 基于 `noid-rank-replace`，追加 10 个多周期基础特征：3/20/40 日收益、5/40 日波动率、3/10/40 日均线偏离和 3/20、10/40 量能比例。它用于测试更完整的短中期窗口是否能改善源模型排序信号。
 
@@ -111,6 +111,8 @@ sh tune.sh quick --skip-final --resume
 `stable` 不是新架构，只是 `balanced` 的正则化对照：默认 3 个窗口、`dropout=0.2`、`weight_decay=1e-4`。它和 `balanced` 使用相同的模型规模、epoch 上限和早停耐心值，方便只比较正则化差异。如果它比同窗口 `balanced` 更稳，说明后续可以继续沿正则化方向调；如果没有改善，就不要继续在 dropout 上耗时间。
 
 ## 5. 下一轮推荐对照
+
+后续新实验遵循 [实验纪律与分级验证](../experiments/experiment_protocol.md)：先跑 6 窗口探索，再按证据推进到 12 和 24 窗口。6 窗口明显弱于主对照时停止扩跑，但只说明“当前实现未通过”，不直接否定整个特征方向。
 
 `v1.2.15 balanced` 与 `v1.2.13 noid` 的 12 窗口对照显示，移除 `instrument` 后均值和多数窗口表现更好。两者 epoch 上限不同，但最佳 epoch 都没有超过 15，因此结论仍有参考价值；若后续重新研究 `instrument`，应使用当前统一预算重跑。`v1.3.0 noid-rank` 最近 3 窗口均值明显变差，因此不要直接扩到 12 窗口。
 
@@ -160,6 +162,14 @@ sh tune.sh v1.2.14 noid-full --windows 3 --skip-final
 sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2.13
 sh tune.sh v1.2.0 large --windows 3
 sh tune.sh v1.2.0 full --windows 3
+```
+
+新特征建议使用连续版本号分级跑：
+
+```bash
+sh tune.sh v1.7.0 <profile> --windows 6 --skip-final
+sh tune.sh v1.7.1 <profile> --windows 12 --skip-final
+sh tune.sh v1.7.2 <profile> --windows 24 --skip-final
 ```
 
 已有实验补完预测诊断后，可以比较候选池：
