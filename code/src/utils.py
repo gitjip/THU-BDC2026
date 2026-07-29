@@ -80,6 +80,10 @@ MARKET_RELATIVE_FEATURE_SPECS = [
     ('volatility_20', 'mkt_rel_volatility_20', 'median_ratio'),
 ]
 
+MARKET_BREADTH_FEATURE_COLUMNS = [
+    'mkt_breadth_5',
+]
+
 TREND_QUALITY_FEATURE_COLUMNS = [
     'tq_mom5_vol10',
     'tq_mom10_vol20',
@@ -237,6 +241,54 @@ def add_market_relative_features(df, specs=None):
 
 def apply_market_relative_features(df, feature_columns):
     processed, added_columns = add_market_relative_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
+
+
+def market_breadth_feature_names():
+    return list(MARKET_BREADTH_FEATURE_COLUMNS)
+
+
+def add_market_breadth_features(df):
+    """Add a per-date market breadth feature shared by all stocks on that date."""
+    required_columns = {'日期', '涨跌幅'}
+    missing = required_columns - set(df.columns)
+    if missing:
+        return df.copy(), []
+
+    result = df.copy()
+    dates = pd.to_datetime(result['日期'], errors='coerce').dt.normalize()
+    pct_chg = pd.to_numeric(result['涨跌幅'], errors='coerce')
+    valid = dates.notna() & pct_chg.notna()
+
+    if valid.any():
+        daily = pd.DataFrame(
+            {
+                '日期': dates[valid],
+                'up': pct_chg[valid].gt(0).astype(float),
+                'down': pct_chg[valid].lt(0).astype(float),
+            }
+        )
+        breadth = daily.groupby('日期', sort=True)[['up', 'down']].mean()
+        breadth['mkt_breadth'] = breadth['up'] - breadth['down']
+        breadth['mkt_breadth_5'] = breadth['mkt_breadth'].rolling(5, min_periods=1).mean()
+        result['mkt_breadth_5'] = dates.map(breadth['mkt_breadth_5'])
+    else:
+        result['mkt_breadth_5'] = 0.0
+
+    result['mkt_breadth_5'] = (
+        pd.to_numeric(result['mkt_breadth_5'], errors='coerce')
+        .replace([np.inf, -np.inf], np.nan)
+        .clip(lower=-1.0, upper=1.0)
+        .fillna(0.0)
+        .astype(float)
+    )
+    return result, list(MARKET_BREADTH_FEATURE_COLUMNS)
+
+
+def apply_market_breadth_features(df, feature_columns):
+    processed, added_columns = add_market_breadth_features(df)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns

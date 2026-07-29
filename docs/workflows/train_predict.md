@@ -176,6 +176,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `loss_target_temperature`：默认等于 `loss_temperature`；可用 `BDC_LOSS_TARGET_TEMPERATURE=0.05` 让真实收益目标分布更尖锐，强化 top 股票排序信号。
 - `use_instrument_feature`：默认开启；可用 `BDC_USE_INSTRUMENT_FEATURE=0` 从模型输入中移除股票编号特征。
 - `use_market_relative_features`：默认关闭；可用 `BDC_USE_MARKET_RELATIVE_FEATURES=1` 追加市场相对特征。
+- `use_market_breadth_features`：默认关闭；可用 `BDC_USE_MARKET_BREADTH_FEATURES=1` 追加市场宽度特征 `mkt_breadth_5`。
 - `use_trend_quality_features`：默认关闭；可用 `BDC_USE_TREND_QUALITY_FEATURES=1` 追加趋势质量特征。
 - `use_clean_risk_features`：默认关闭；可用 `BDC_USE_CLEAN_RISK_FEATURES=1` 追加无成交、流动性和回撤风险特征。
 - `use_multi_period_features`：默认关闭；可用 `BDC_USE_MULTI_PERIOD_FEATURES=1` 追加 3/5/10/20/40 日多周期基础特征。
@@ -206,6 +207,7 @@ BDC_USE_INSTRUMENT_FEATURE=0 BDC_CROSS_SECTIONAL_RANK_MODE=replace BDC_CROSS_SEC
 BDC_LOSS_TARGET_TEMPERATURE=0.05 sh tune.sh v1.5.0 noid-rank-replace --windows 3 --skip-final
 sh tune.sh v1.6.0 noid-rank-cleanrisk --windows 3 --skip-final
 sh tune.sh v1.6.1 noid-rank-multiperiod --windows 3 --skip-final
+sh tune.sh v1.6.2 noid-rank-breadth --windows 3 --skip-final
 BDC_NUM_EPOCHS=30 BDC_LR_SCHEDULER=off BDC_EARLY_STOPPING_PATIENCE=0 sh tune.sh v1.2.10 noid --skip-final
 BDC_SUBMISSION_MODE=single sh train.sh
 BDC_SUBMISSION_MODE=single sh test.sh

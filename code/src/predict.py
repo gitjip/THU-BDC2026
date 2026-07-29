@@ -24,6 +24,7 @@ from stage2_selection import normalize_selection_strategy, select_predictions
 from utils import (
 	apply_cross_sectional_rank_features,
 	apply_clean_risk_features,
+	apply_market_breadth_features,
 	apply_market_relative_features,
 	apply_multi_period_features,
 	apply_trend_quality_features,
@@ -183,6 +184,16 @@ def preprocess_predict_data(df, stockid2idx):
 		logger.info(
 			"预测集: 已添加市场相对特征 %s 个，输入特征=%s",
 			len(market_relative_columns),
+			len(feature_columns),
+		)
+	if config.get('use_market_breadth_features', False):
+		processed, feature_columns, market_breadth_columns = apply_market_breadth_features(
+			processed,
+			feature_columns,
+		)
+		logger.info(
+			"预测集: 已添加市场宽度特征 %s 个，输入特征=%s",
+			len(market_breadth_columns),
 			len(feature_columns),
 		)
 	if config.get('use_trend_quality_features', False):

@@ -124,7 +124,7 @@ Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top
 
 当前结论：`v1.3.3` 和 `v1.3.4` 都没有显示出继续细分相对特征的价值。后续 24 窗口复核后，主提交配置已改为 `noid-rank-replace`；不要把 rank-lite 或 marketrel 升为默认。
 
-`v1.6.0 noid-rank-cleanrisk` 已跑完 24 窗口，均值和最差窗口都明显变差，说明清洗启发的流动性/回撤风险特征这条线暂时不值得继续。`v1.6.1 noid-rank-multiperiod` 也在 24 窗口明显变差，均值约 `-0.012037`，相对 `v1.4.5 rank-replace` 只在 `5/24` 个窗口胜出。当前不要继续做成组基础特征追加；默认策略仍保持 `noid-rank-replace`。
+`v1.6.0 noid-rank-cleanrisk` 已跑完 24 窗口，均值和最差窗口都明显变差，说明清洗启发的流动性/回撤风险特征这条线暂时不值得继续。`v1.6.1 noid-rank-multiperiod` 也在 24 窗口明显变差，均值约 `-0.012037`，相对 `v1.4.5 rank-replace` 只在 `5/24` 个窗口胜出。当前不要继续做成组基础特征追加；如果继续做特征，只测试 `v1.6.2 noid-rank-breadth` 这种单个市场环境信号。默认策略仍保持 `noid-rank-replace`。
 
 ## 10. 当前策略
 
