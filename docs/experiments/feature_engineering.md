@@ -199,12 +199,40 @@ mkt_breadth_5 = daily_breadth 的过去 5 个交易日滚动均值
 
 当前结论：`mkt_breadth_5` 单列当前实现未通过，不扩 12/24 窗口；市场环境方向不永久否定，但下一次必须换成更贴近横截面排序的表达。
 
-## 8. 下一步特征方向
+## 8. 短中期动量 rank 差（待测）
+
+`v1.7.0 noid-rank-momdelta` 回到当前主候选 `noid-rank-replace`，只追加 1 个横截面动量变化特征：
+
+- `ret5_rank_minus_ret20_rank`
+
+定义：
+
+```text
+ret5_rank = 当日 return_5 在全市场中的百分位排名
+ret20_rank = 当日过去 20 日收益在全市场中的百分位排名
+ret5_rank_minus_ret20_rank = ret5_rank - ret20_rank
+```
+
+解释：
+
+- 值为正：短期相对强度高于中期相对强度，可能表示刚开始走强或短期加速；
+- 值为负：短期相对强度弱于中期相对强度，可能表示中期强股近期降温；
+- 和 `mkt_breadth_5` 不同，它在同一日期内能区分股票，更贴近横截面排序任务。
+
+它只使用每只股票当前日期及之前的收盘价，不看未来目标窗口；输入维度只增加 1 列，适合按 `6 -> 12 -> 24` 分级验证。
+
+推荐第一步：
+
+```bash
+sh tune.sh v1.7.0 noid-rank-momdelta --windows 6 --skip-final
+```
+
+## 9. 下一步特征方向
 
 优先级建议：
 
 1. 把 `noid-rank-replace` 作为当前最强单模型候选，同时保留 `noid` 作为对照基线。
-2. 下一步优先测试单列横截面动量变化信号 `ret5_rank_minus_ret20_rank`。
+2. 下一步优先按 6 窗口测试 `v1.7.0 noid-rank-momdelta`。
 3. 暂停 `v1.6.2 noid-rank-breadth` 单列市场宽度实现，不扩 12/24 窗口。
 4. 暂停 `v1.6.1 noid-rank-multiperiod`，不要继续扩跑。
 5. 暂停 `v1.6.0 noid-rank-cleanrisk`，不要继续扩跑。

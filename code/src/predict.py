@@ -27,6 +27,7 @@ from utils import (
 	apply_market_breadth_features,
 	apply_market_relative_features,
 	apply_multi_period_features,
+	apply_rank_momentum_features,
 	apply_trend_quality_features,
 	engineer_features_39,
 	engineer_features_158plus39,
@@ -220,6 +221,16 @@ def preprocess_predict_data(df, stockid2idx):
 			rank_mode,
 			rank_replace_set,
 			len(rank_feature_columns),
+			len(feature_columns),
+		)
+	if config.get('use_rank_momentum_features', False):
+		processed, feature_columns, rank_momentum_columns = apply_rank_momentum_features(
+			processed,
+			feature_columns,
+		)
+		logger.info(
+			"预测集: 已添加横截面动量变化特征 %s 个，输入特征=%s",
+			len(rank_momentum_columns),
 			len(feature_columns),
 		)
 	if config.get('use_multi_period_features', False):
