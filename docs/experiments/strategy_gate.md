@@ -33,9 +33,11 @@
 输出：
 
 - `gate_features.csv`：每个窗口的门控信号和事后得分；
-- `gate_rule_summary.csv`：每条规则的跨窗口均值、最差窗口、正分窗口、误切高分窗口等指标；
+- `gate_rule_summary.csv`：每条规则的主目标、风险和门控专用指标；
 - `gate_window_scores.csv`：每条规则在每个窗口选择了哪个策略；
 - `readme.md`：中文摘要。
+
+指标口径统一参考 [evaluation_metrics.md](evaluation_metrics.md)。门控诊断会输出 `passes_exploration_checks`、`passes_candidate_checks` 和 `passes_default_checks` 三层检查结果；通过默认候选检查也只表示“值得另起版本接入复现”，不表示可以直接改提交默认。
 
 ## 门控信号
 
@@ -57,7 +59,25 @@
 - Transformer 基线：均值约 `0.017557`，最差约 `-0.066987`，正分窗口 `14/24`；
 - 最好门控：`v1.12.1 / gate_tf_overheat_ge_0p7`，均值约 `0.029874`，最差仍为 `-0.066987`，正分窗口 `17/24`；
 - 该规则在高分窗口切防守比例约 `0.300`，最大两个正向改善贡献占比约 `0.520`；
-- 没有规则同时满足“均值不低于 Transformer、最差窗口优于 Transformer、正分窗口不低于 Transformer、高分窗口误切可控、不能只靠少数窗口拉高”的完整验收标准。
+- 按旧的严格最差窗口口径，没有规则同时满足“均值、最差窗口、正分窗口、高分窗口误切和改善集中度”全部要求。
 
-结论：门控方向有信号，尤其“Transformer top5 短期过热时切 `ensemble-lowoverheat`”明显提高均值和正分窗口数；但第一版没有覆盖最差窗口，暂不接入正式提交。下一步若继续，应围绕“识别最差窗口”做更小的规则，例如把市场弱势信号与过热信号组合，而不是直接把当前最佳均值规则上线。
+结论：门控方向有信号，尤其“Transformer top5 短期过热时切 `ensemble-lowoverheat`”明显提高均值和正分窗口数。后续不应继续用单个 `min_score` 一票否决，而应按 `mean_score + paired_mean_diff + worst3/CVaR + 高分误切` 综合判断。若继续门控方向，应围绕“识别低分窗口和保护高分窗口”做更小的规则，例如把市场弱势信号与过热信号组合，而不是直接把当前最佳均值规则上线。
 
+## v1.12.3 指标规范化
+
+`v1.12.3` 不改门控规则，只补充统一指标：
+
+- 主目标：`mean_score`、`paired_mean_diff`、`active_win_rate_vs_primary`；
+- 风险：`risk_adjusted_score`、`worst3_mean_score`、`cvar_20_score`、`top2_positive_diff_share`；
+- 门控：`bad_window_recall`、`bad_window_precision`、`very_bad_window_recall`、`rescued_score_mean`、`hurt_score_mean`、`high_window_false_switch_rate`；
+- 三层检查：探索、候选、默认候选。
+
+按新指标重新生成 `experiments/analysis/strategy_gate_v1.4.5_vs_v1.12.0_vs_v1.12.1/` 后：
+
+- Transformer 基线：均值约 `0.017557`，CVaR20 约 `-0.046114`，worst3 约 `-0.053284`；
+- `v1.12.1 / gate_tf_overheat_ge_0p7`：均值约 `0.029874`，CVaR20 约 `-0.038526`，worst3 约 `-0.049893`；
+- 负分窗口召回约 `0.400`，切防守精确率约 `0.500`，高分窗口误切比例约 `0.300`；
+- 最大两个正向改善贡献占比约 `0.520`；
+- 该规则通过探索、候选和默认候选三层指标检查。
+
+这一步的目的不是证明某个规则可提交，而是先固定评估口径。`gate_tf_overheat_ge_0p7` 现在可以视为“值得另起版本接入 walk-forward 复现”的默认候选，但不能直接改正式提交默认。之后无论做市场弱势门控、低过热集成还是 LightGBM 防守，都应使用同一套汇总表判断。

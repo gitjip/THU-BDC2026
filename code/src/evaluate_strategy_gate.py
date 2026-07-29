@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -12,10 +13,15 @@ from stage2_selection import compute_recent_risk_metrics
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOP_K = 5
 PRIMARY_HIGH_THRESHOLD = 0.03
+VERY_BAD_THRESHOLD = -0.03
 OVERHEAT_THRESHOLDS = (0.65, 0.70, 0.75, 0.80)
 VOLATILITY_THRESHOLDS = (0.65, 0.70, 0.75, 0.80)
 OVERLAP_THRESHOLDS = (0, 1)
 COMBO_OVERHEAT_THRESHOLDS = (0.65, 0.70, 0.75)
+CVAR_TAIL_FRACTION = 0.20
+EXPLORATION_TOP2_DIFF_SHARE_LIMIT = 0.70
+WORST3_TOLERANCE = 0.005
+CVAR_TOLERANCE = 0.005
 TOP2_POSITIVE_DIFF_SHARE_LIMIT = 0.60
 HIGH_WINDOW_SWITCH_RATE_LIMIT = 0.30
 
@@ -272,13 +278,26 @@ def add_rule_rows(
                 "primary_score": float(feature["primary_score"]),
                 "defense_score": float(feature[defense_score_column]),
                 "diff_vs_primary": diff,
+                "primary_bad_window": bool(feature["primary_score"] < 0),
+                "primary_very_bad_window": bool(
+                    feature["primary_score"] <= VERY_BAD_THRESHOLD
+                ),
                 "primary_high_window": bool(feature["primary_high_window"]),
+                "bad_window_switched": bool(
+                    feature["primary_score"] < 0 and use_defense.loc[idx]
+                ),
+                "very_bad_window_switched": bool(
+                    feature["primary_score"] <= VERY_BAD_THRESHOLD
+                    and use_defense.loc[idx]
+                ),
                 "high_window_switched": bool(
                     feature["primary_high_window"] and use_defense.loc[idx]
                 ),
                 "high_window_hurt_by_switch": bool(
                     feature["primary_high_window"] and use_defense.loc[idx] and diff < 0
                 ),
+                "defense_improved_window": bool(use_defense.loc[idx] and diff > 0),
+                "defense_hurt_window": bool(use_defense.loc[idx] and diff < 0),
                 "tf_top5_overheat_mean": float(feature["tf_top5_overheat_mean"]),
                 "tf_top5_volatility_mean": float(feature["tf_top5_volatility_mean"]),
                 "tf_lgbm_top5_overlap": int(feature["tf_lgbm_top5_overlap"]),
@@ -404,6 +423,43 @@ def top2_positive_diff_share(diffs: pd.Series) -> float:
     return float(positive.nlargest(min(2, len(positive))).sum() / total)
 
 
+def safe_rate(numerator: int, denominator: int) -> float:
+    return float(numerator / denominator) if denominator else 0.0
+
+
+def bool_count(values: pd.Series) -> int:
+    return int(values.fillna(False).astype(bool).sum())
+
+
+def cvar_score(scores: pd.Series, tail_fraction: float = CVAR_TAIL_FRACTION) -> float:
+    numeric = pd.to_numeric(scores, errors="coerce").dropna()
+    if numeric.empty:
+        return 0.0
+    tail_size = max(1, math.ceil(len(numeric) * tail_fraction))
+    return float(numeric.nsmallest(tail_size).mean())
+
+
+def worst_n_mean(scores: pd.Series, n: int = 3) -> float:
+    numeric = pd.to_numeric(scores, errors="coerce").dropna()
+    if numeric.empty:
+        return 0.0
+    return float(numeric.nsmallest(min(n, len(numeric))).mean())
+
+
+def risk_adjusted_score(scores: pd.Series) -> float:
+    numeric = pd.to_numeric(scores, errors="coerce").dropna()
+    if numeric.empty:
+        return 0.0
+    return float(numeric.mean() - 0.5 * numeric.std(ddof=0))
+
+
+def mean_or_zero(values: pd.Series) -> float:
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if numeric.empty:
+        return 0.0
+    return float(numeric.mean())
+
+
 def summarize_rules(window_scores: pd.DataFrame) -> pd.DataFrame:
     primary_rows = window_scores[window_scores["rule"].eq("always_primary")]
     baseline_by_target = {
@@ -422,50 +478,118 @@ def summarize_rules(window_scores: pd.DataFrame) -> pd.DataFrame:
         baseline = baseline_by_target[defense_target]
         baseline_scores = pd.to_numeric(baseline["score"], errors="coerce")
         baseline_mean = float(baseline_scores.mean())
+        baseline_std = float(baseline_scores.std(ddof=0))
         baseline_min = float(baseline_scores.min())
+        baseline_worst3 = worst_n_mean(baseline_scores, 3)
+        baseline_cvar20 = cvar_score(baseline_scores)
+        baseline_risk_adjusted = risk_adjusted_score(baseline_scores)
         baseline_positive = int((baseline_scores > 0).sum())
+
         scores = pd.to_numeric(group["score"], errors="coerce")
         diffs = pd.to_numeric(group["diff_vs_primary"], errors="coerce")
+        switch_mask = group["use_defense"].fillna(False).astype(bool)
+        bad_mask = group["primary_bad_window"].fillna(False).astype(bool)
+        very_bad_mask = group["primary_very_bad_window"].fillna(False).astype(bool)
         high_windows = group[group["primary_high_window"]]
+
+        window_count = int(len(group))
+        win_count = int((diffs > 1e-12).sum())
+        loss_count = int((diffs < -1e-12).sum())
+        tie_count = int(diffs.abs().le(1e-12).sum())
+        active_count = win_count + loss_count
+        defense_use_count = bool_count(group["use_defense"])
+        bad_window_count = bool_count(group["primary_bad_window"])
+        very_bad_window_count = bool_count(group["primary_very_bad_window"])
+        bad_switch_count = bool_count(group["bad_window_switched"])
+        very_bad_switch_count = bool_count(group["very_bad_window_switched"])
         high_switch_count = int(group["high_window_switched"].sum())
         high_window_count = int(len(high_windows))
         high_switch_rate = (
             high_switch_count / high_window_count if high_window_count else 0.0
         )
-        pass_basic = (
-            float(scores.mean()) >= baseline_mean - 1e-12
-            and float(scores.min()) > baseline_min + 1e-12
-            and int((scores > 0).sum()) >= baseline_positive
-            and high_switch_rate <= HIGH_WINDOW_SWITCH_RATE_LIMIT
-            and top2_positive_diff_share(diffs) <= TOP2_POSITIVE_DIFF_SHARE_LIMIT
-            and rule not in {"always_primary", "always_defense"}
+        positive_diff_share = top2_positive_diff_share(diffs)
+        mean_score = float(scores.mean())
+        std_score = float(scores.std(ddof=0))
+        worst3 = worst_n_mean(scores, 3)
+        cvar20 = cvar_score(scores)
+        paired_mean_diff = float(diffs.mean())
+        active_win_rate = safe_rate(win_count, active_count)
+        is_candidate_rule = rule not in {"always_primary", "always_defense"}
+
+        passes_exploration = (
+            is_candidate_rule
+            and paired_mean_diff > 1e-12
+            and positive_diff_share <= EXPLORATION_TOP2_DIFF_SHARE_LIMIT
         )
+        passes_candidate = (
+            passes_exploration
+            and active_win_rate >= 0.50
+            and int((scores > 0).sum()) >= baseline_positive
+            and worst3 >= baseline_worst3 - WORST3_TOLERANCE
+            and cvar20 >= baseline_cvar20 - CVAR_TOLERANCE
+            and positive_diff_share <= TOP2_POSITIVE_DIFF_SHARE_LIMIT
+        )
+        passes_default = (
+            passes_candidate
+            and worst3 >= baseline_worst3 - 1e-12
+            and cvar20 >= baseline_cvar20 - 1e-12
+            and high_switch_rate <= HIGH_WINDOW_SWITCH_RATE_LIMIT
+        )
+
         rows.append(
             {
                 "defense_target": defense_target,
                 "rule": rule,
                 "description": group["description"].iloc[0],
-                "window_count": int(len(group)),
-                "mean_score": float(scores.mean()),
+                "window_count": window_count,
+                "mean_score": mean_score,
                 "median_score": float(scores.median()),
-                "std_score": float(scores.std(ddof=0)),
+                "std_score": std_score,
+                "risk_adjusted_score": risk_adjusted_score(scores),
                 "min_score": float(scores.min()),
                 "max_score": float(scores.max()),
-                "worst3_mean_score": float(
-                    scores.nsmallest(min(3, len(scores))).mean()
-                ),
+                "worst3_mean_score": worst3,
+                "cvar_20_score": cvar20,
                 "positive_windows": int((scores > 0).sum()),
                 "negative_windows": int((scores < 0).sum()),
-                "mean_diff_vs_primary": float(diffs.mean()),
+                "paired_mean_diff": paired_mean_diff,
+                "mean_diff_vs_primary": paired_mean_diff,
                 "median_diff_vs_primary": float(diffs.median()),
-                "win_windows_vs_primary": int((diffs > 1e-12).sum()),
-                "loss_windows_vs_primary": int((diffs < -1e-12).sum()),
-                "tie_windows_vs_primary": int(diffs.abs().le(1e-12).sum()),
-                "defense_use_count": int(group["use_defense"].sum()),
-                "defense_use_rate": float(group["use_defense"].mean()),
+                "win_windows_vs_primary": win_count,
+                "loss_windows_vs_primary": loss_count,
+                "tie_windows_vs_primary": tie_count,
+                "win_rate_vs_primary": safe_rate(win_count, window_count),
+                "active_win_rate_vs_primary": active_win_rate,
+                "non_loss_rate_vs_primary": safe_rate(
+                    win_count + tie_count, window_count
+                ),
+                "defense_use_count": defense_use_count,
+                "defense_use_rate": safe_rate(defense_use_count, window_count),
+                "bad_window_count": bad_window_count,
+                "bad_window_switch_count": bad_switch_count,
+                "bad_window_recall": safe_rate(bad_switch_count, bad_window_count),
+                "bad_window_precision": safe_rate(bad_switch_count, defense_use_count),
+                "very_bad_window_count": very_bad_window_count,
+                "very_bad_window_switch_count": very_bad_switch_count,
+                "very_bad_window_recall": safe_rate(
+                    very_bad_switch_count, very_bad_window_count
+                ),
+                "switched_window_mean_diff": mean_or_zero(diffs[switch_mask]),
+                "bad_window_switch_mean_diff": mean_or_zero(
+                    diffs[bad_mask & switch_mask]
+                ),
+                "rescued_window_count": int(
+                    ((bad_mask & switch_mask) & (diffs > 1e-12)).sum()
+                ),
+                "rescued_score_mean": mean_or_zero(
+                    diffs[(bad_mask & switch_mask) & (diffs > 1e-12)]
+                ),
+                "hurt_window_count": int((switch_mask & (diffs < -1e-12)).sum()),
+                "hurt_score_mean": mean_or_zero(diffs[switch_mask & (diffs < -1e-12)]),
                 "primary_high_window_count": high_window_count,
                 "high_window_switch_count": high_switch_count,
                 "high_window_switch_rate": high_switch_rate,
+                "high_window_false_switch_rate": high_switch_rate,
                 "high_window_hurt_by_switch_count": int(
                     group["high_window_hurt_by_switch"].sum()
                 ),
@@ -474,23 +598,37 @@ def summarize_rules(window_scores: pd.DataFrame) -> pd.DataFrame:
                     if high_window_count
                     else 0.0
                 ),
-                "top2_positive_diff_share": top2_positive_diff_share(diffs),
+                "top2_positive_diff_share": positive_diff_share,
                 "baseline_primary_mean": baseline_mean,
+                "baseline_primary_std": baseline_std,
                 "baseline_primary_min": baseline_min,
+                "baseline_primary_worst3_mean": baseline_worst3,
+                "baseline_primary_cvar_20": baseline_cvar20,
+                "baseline_primary_risk_adjusted": baseline_risk_adjusted,
                 "baseline_primary_positive_windows": baseline_positive,
                 "target_always_defense_mean": (
                     float(defense_mean_by_target[defense_target])
                     if defense_target in defense_mean_by_target
                     else None
                 ),
-                "passes_basic_checks": pass_basic,
+                "passes_exploration_checks": passes_exploration,
+                "passes_candidate_checks": passes_candidate,
+                "passes_default_checks": passes_default,
+                "passes_basic_checks": passes_default,
             }
         )
     return (
         pd.DataFrame(rows)
         .sort_values(
-            ["passes_basic_checks", "mean_score", "min_score", "positive_windows"],
-            ascending=[False, False, False, False],
+            [
+                "passes_default_checks",
+                "passes_candidate_checks",
+                "passes_exploration_checks",
+                "mean_score",
+                "cvar_20_score",
+                "positive_windows",
+            ],
+            ascending=[False, False, False, False, False, False],
         )
         .reset_index(drop=True)
     )
@@ -506,11 +644,21 @@ def write_readme(
     baseline = summary[summary["rule"].eq("always_primary")].iloc[0]
     candidates = summary[~summary["rule"].isin(["always_primary", "always_defense"])]
     best = candidates.iloc[0] if not candidates.empty else baseline
-    passed = summary[summary["passes_basic_checks"]]
+    default_passed = summary[summary["passes_default_checks"]]
+    candidate_passed = summary[summary["passes_candidate_checks"]]
+    exploration_passed = summary[summary["passes_exploration_checks"]]
     recommendation = (
-        "已有门控规则通过第一版验收，可考虑下一版本接入为可选策略继续验证。"
-        if not passed.empty
-        else "没有门控规则同时改善均值、最差窗口和高分窗口误切约束，暂不接入正式预测。"
+        "已有规则通过指标层默认候选检查，但本脚本仍只是离线诊断；需要另起版本接入 walk-forward 复现后才可考虑改正式预测。"
+        if not default_passed.empty
+        else (
+            "已有规则通过候选检查，可继续围绕该信号做小步复核；暂不直接改正式预测。"
+            if not candidate_passed.empty
+            else (
+                "已有规则通过探索检查，说明方向有信号，但还不足以作为候选策略。"
+                if not exploration_passed.empty
+                else "没有门控规则通过探索检查，暂不继续接入。"
+            )
+        )
     )
 
     lines = [
@@ -534,32 +682,41 @@ def write_readme(
         "",
         (
             f"- Transformer 基线：均值 `{baseline['mean_score']:.6f}`，"
-            f"最差 `{baseline['min_score']:.6f}`，"
+            f"CVaR20 `{baseline['cvar_20_score']:.6f}`，"
+            f"worst3 `{baseline['worst3_mean_score']:.6f}`，"
             f"正分窗口 `{int(baseline['positive_windows'])}/{int(baseline['window_count'])}`。"
         ),
     ]
     if not candidates.empty:
         lines.append(
             f"- 最好门控：`{best['defense_target']} / {best['rule']}`，"
-            f"均值 `{best['mean_score']:.6f}`，最差 `{best['min_score']:.6f}`，"
+            f"均值 `{best['mean_score']:.6f}`，CVaR20 `{best['cvar_20_score']:.6f}`，"
+            f"worst3 `{best['worst3_mean_score']:.6f}`，"
             f"正分 `{int(best['positive_windows'])}/{int(best['window_count'])}`，"
-            f"相对 Transformer `{best['mean_diff_vs_primary']:+.6f}`。"
+            f"配对均值差 `{best['paired_mean_diff']:+.6f}`。"
         )
         lines.append(
-            f"- 高分窗口切防守比例 `{best['high_window_switch_rate']:.3f}`，"
+            f"- 负分窗口召回 `{best['bad_window_recall']:.3f}`，"
+            f"防守切换精确率 `{best['bad_window_precision']:.3f}`，"
+            f"高分窗口误切比例 `{best['high_window_false_switch_rate']:.3f}`，"
             f"最大两个正向改善贡献占比 `{best['top2_positive_diff_share']:.3f}`。"
+        )
+        lines.append(
+            f"- 三层检查：探索 `{bool(best['passes_exploration_checks'])}`，"
+            f"候选 `{bool(best['passes_candidate_checks'])}`，"
+            f"默认候选 `{bool(best['passes_default_checks'])}`。"
         )
     lines.append(f"- 建议：{recommendation}")
     lines.extend(
         [
             "",
-            "## 验收标准",
+            "## 指标口径",
             "",
-            "- 均值不低于 Transformer；",
-            "- 最差窗口优于 Transformer；",
-            "- 正分窗口不低于 Transformer；",
-            "- `primary_score > 0.03` 的高分窗口中，误切防守比例不超过 30%；",
-            "- 最大两个正向改善贡献占比不超过 60%。",
+            "- `mean_score` 和 `paired_mean_diff` 是主目标，近似衡量期望得分；",
+            "- `worst3_mean_score` 和 `cvar_20_score` 比单个 `min_score` 更适合作风险判断；",
+            "- `min_score` 只作为警报，不再作为一票否决；",
+            "- `bad_window_recall`、`bad_window_precision`、`high_window_false_switch_rate` 是门控专用诊断；",
+            "- `passes_exploration_checks`、`passes_candidate_checks`、`passes_default_checks` 分别对应探索、候选和默认候选三层标准。",
             "",
             "门控规则只使用预测日前可见信号。`primary_score`、`lgbm_score`、`defense_score` 只用于事后评分，不可作为线上门控输入。",
         ]
