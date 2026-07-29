@@ -88,6 +88,10 @@ RANK_MOMENTUM_FEATURE_COLUMNS = [
     'ret5_rank_minus_ret20_rank',
 ]
 
+RANK_RISKADJ_FEATURE_COLUMNS = [
+    'ret5_rank_minus_vol20_rank',
+]
+
 TREND_QUALITY_FEATURE_COLUMNS = [
     'tq_mom5_vol10',
     'tq_mom10_vol20',
@@ -335,6 +339,53 @@ def add_rank_momentum_features(df):
 
 def apply_rank_momentum_features(df, feature_columns):
     processed, added_columns = add_rank_momentum_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
+
+
+def rank_riskadj_feature_names():
+    return list(RANK_RISKADJ_FEATURE_COLUMNS)
+
+
+def add_rank_riskadj_features(df):
+    """Add a one-column cross-sectional risk-adjusted short momentum signal."""
+    required_columns = {'股票代码', '日期', '收盘'}
+    missing = required_columns - set(df.columns)
+    if missing:
+        return df.copy(), []
+
+    result = df.copy()
+    result = result.sort_values(['股票代码', '日期']).reset_index(drop=True)
+    dates = pd.to_datetime(result['日期'], errors='coerce').dt.normalize()
+    groups = result.groupby('股票代码', sort=False)
+
+    if 'return_5' in result.columns:
+        return_5 = pd.to_numeric(result['return_5'], errors='coerce')
+    else:
+        return_5 = groups['收盘'].transform(lambda values: pd.to_numeric(values, errors='coerce').pct_change(5, fill_method=None))
+
+    if 'volatility_20' in result.columns:
+        volatility_20 = pd.to_numeric(result['volatility_20'], errors='coerce')
+    else:
+        return_1 = groups['收盘'].transform(lambda values: pd.to_numeric(values, errors='coerce').pct_change(1, fill_method=None))
+        volatility_20 = return_1.groupby(result['股票代码'], sort=False).transform(lambda values: values.rolling(20, min_periods=10).std())
+
+    ret5_rank = return_5.groupby(dates).rank(method='average', pct=True).fillna(0.5)
+    vol20_rank = volatility_20.groupby(dates).rank(method='average', pct=True).fillna(0.5)
+    result['ret5_rank_minus_vol20_rank'] = (
+        (ret5_rank - vol20_rank)
+        .replace([np.inf, -np.inf], np.nan)
+        .clip(lower=-1.0, upper=1.0)
+        .fillna(0.0)
+        .astype(float)
+    )
+
+    return result, list(RANK_RISKADJ_FEATURE_COLUMNS)
+
+
+def apply_rank_riskadj_features(df, feature_columns):
+    processed, added_columns = add_rank_riskadj_features(df)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns

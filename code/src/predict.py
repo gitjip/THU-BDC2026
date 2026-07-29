@@ -28,6 +28,7 @@ from utils import (
 	apply_market_relative_features,
 	apply_multi_period_features,
 	apply_rank_momentum_features,
+	apply_rank_riskadj_features,
 	apply_trend_quality_features,
 	engineer_features_39,
 	engineer_features_158plus39,
@@ -231,6 +232,16 @@ def preprocess_predict_data(df, stockid2idx):
 		logger.info(
 			"预测集: 已添加横截面动量变化特征 %s 个，输入特征=%s",
 			len(rank_momentum_columns),
+			len(feature_columns),
+		)
+	if config.get('use_rank_riskadj_features', False):
+		processed, feature_columns, rank_riskadj_columns = apply_rank_riskadj_features(
+			processed,
+			feature_columns,
+		)
+		logger.info(
+			"预测集: 已添加横截面风险调整动量特征 %s 个，输入特征=%s",
+			len(rank_riskadj_columns),
 			len(feature_columns),
 		)
 	if config.get('use_multi_period_features', False):

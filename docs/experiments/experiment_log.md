@@ -28,7 +28,8 @@
 - `v1.6.3` 修复 `--resume` 安全性：跳过训练/预测前会校验旧 manifest、窗口 metadata 和 summary 日期，避免更新 `stock_data` 后按 `window_01` 误复用旧模型。
 - `v1.6.3` 修复前用 `--resume` 产生的旧结果需要降级为待复核；重跑后的结果优先于本文早期记录。
 - 后续新方向采用 `6 -> 12 -> 24` 分级验证：6 窗口探索、12 窗口复核、24 窗口确认。短测失败只说明“当前实现未通过”，不直接否定整个方向。
-- `v1.7.0` 准备测试 `noid-rank-momdelta`：在 `rank-replace` 上只追加 `ret5_rank_minus_ret20_rank`，按新规程先跑 6 窗口。
+- `v1.7.0 noid-rank-momdelta` 6 窗口明显变差：均值约 `-0.032498`，相同日期只在 `1/6` 窗口胜过 `rank-replace`，不扩 12/24 窗口。
+- `v1.8.0` 准备测试 `noid-rank-riskadj`：在 `rank-replace` 上只追加 `ret5_rank_minus_vol20_rank`，按新规程先跑 6 窗口。
 
 ## 版本记录
 
@@ -67,6 +68,8 @@
 | `v1.5.0` | `noid-rank-sharp` 3 窗口短测 | 3 | `-0.024860` | 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`；同日期对照下 0/3 胜出，均值略差，先止损。 |
 | `v1.6.0` | `noid-rank-cleanrisk` 24 窗口 | 24 | `0.000872` | 在 `noid-rank-replace` 上追加清洗启发的流动性/回撤风险特征后明显变差；`24/24` 里只有 `12` 个窗口比 `rank-replace` 更好，不值得扩跑。 |
 | `v1.6.1` | `noid-rank-multiperiod` 24 窗口 | 24 | `-0.012037` | 在 `noid-rank-replace` 上追加 10 个多周期基础特征后明显变差；相对 `v1.4.5 rank-replace` 仅 `5/24` 胜出，平均差值约 `-0.029594`，不值得保留。 |
+| `v1.7.0` | `noid-rank-momdelta` 短中期动量rank差 | 6 | `-0.032498` | 单列 `ret5_rank_minus_ret20_rank` 未通过，可能强化坏的重复选股倾向，不扩跑。 |
+| `v1.8.0` | `noid-rank-riskadj` 风险调整短期动量rank差 | 6 | - | 准备测试单列 `ret5_rank_minus_vol20_rank`，目标是捕捉短期强但非纯高波动的股票。 |
 
 ## 后续记录规范
 

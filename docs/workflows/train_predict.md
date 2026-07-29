@@ -178,6 +178,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `use_market_relative_features`：默认关闭；可用 `BDC_USE_MARKET_RELATIVE_FEATURES=1` 追加市场相对特征。
 - `use_market_breadth_features`：默认关闭；可用 `BDC_USE_MARKET_BREADTH_FEATURES=1` 追加市场宽度特征 `mkt_breadth_5`。
 - `use_rank_momentum_features`：默认关闭；可用 `BDC_USE_RANK_MOMENTUM_FEATURES=1` 追加短中期动量 rank 差信号 `ret5_rank_minus_ret20_rank`。
+- `use_rank_riskadj_features`：默认关闭；可用 `BDC_USE_RANK_RISKADJ_FEATURES=1` 追加风险调整短期动量 rank 差信号 `ret5_rank_minus_vol20_rank`。
 - `use_trend_quality_features`：默认关闭；可用 `BDC_USE_TREND_QUALITY_FEATURES=1` 追加趋势质量特征。
 - `use_clean_risk_features`：默认关闭；可用 `BDC_USE_CLEAN_RISK_FEATURES=1` 追加无成交、流动性和回撤风险特征。
 - `use_multi_period_features`：默认关闭；可用 `BDC_USE_MULTI_PERIOD_FEATURES=1` 追加 3/5/10/20/40 日多周期基础特征。
@@ -210,6 +211,7 @@ sh tune.sh v1.6.0 noid-rank-cleanrisk --windows 3 --skip-final
 sh tune.sh v1.6.1 noid-rank-multiperiod --windows 3 --skip-final
 sh tune.sh v1.6.2 noid-rank-breadth --windows 3 --skip-final
 sh tune.sh v1.7.0 noid-rank-momdelta --windows 6 --skip-final
+sh tune.sh v1.8.0 noid-rank-riskadj --windows 6 --skip-final
 BDC_NUM_EPOCHS=30 BDC_LR_SCHEDULER=off BDC_EARLY_STOPPING_PATIENCE=0 sh tune.sh v1.2.10 noid --skip-final
 BDC_SUBMISSION_MODE=single sh train.sh
 BDC_SUBMISSION_MODE=single sh test.sh
