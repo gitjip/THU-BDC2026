@@ -18,6 +18,7 @@ from utils import apply_cross_sectional_rank_features
 from utils import apply_rank_momentum_features
 from utils import apply_rank_riskadj_features
 from utils import apply_ret5_rank_features
+from utils import apply_short_overheat_features
 from utils import apply_clean_risk_features
 from utils import apply_multi_period_features
 import joblib
@@ -211,6 +212,18 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
             "%s: 已添加 return_5 横截面 rank 特征 %s 个，输入特征=%s",
             desc,
             len(ret5_rank_columns),
+            len(feature_columns),
+        )
+
+    if config.get('use_short_overheat_features', False):
+        processed, feature_columns, short_overheat_columns = apply_short_overheat_features(
+            processed,
+            feature_columns,
+        )
+        logger.info(
+            "%s: 已添加短期过热保护特征 %s 个，输入特征=%s",
+            desc,
+            len(short_overheat_columns),
             len(feature_columns),
         )
 

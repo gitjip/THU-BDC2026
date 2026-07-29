@@ -31,6 +31,7 @@ use_market_breadth_features = _env_bool("BDC_USE_MARKET_BREADTH_FEATURES", False
 use_rank_momentum_features = _env_bool("BDC_USE_RANK_MOMENTUM_FEATURES", False)
 use_rank_riskadj_features = _env_bool("BDC_USE_RANK_RISKADJ_FEATURES", False)
 use_ret5_rank_features = _env_bool("BDC_USE_RET5_RANK_FEATURES", False)
+use_short_overheat_features = _env_bool("BDC_USE_SHORT_OVERHEAT_FEATURES", False)
 use_trend_quality_features = _env_bool("BDC_USE_TREND_QUALITY_FEATURES", False)
 use_clean_risk_features = _env_bool("BDC_USE_CLEAN_RISK_FEATURES", False)
 use_multi_period_features = _env_bool("BDC_USE_MULTI_PERIOD_FEATURES", False)
@@ -108,6 +109,8 @@ if use_rank_riskadj_features:
     feature_dir_label = f"{feature_dir_label}_riskadj"
 if use_ret5_rank_features:
     feature_dir_label = f"{feature_dir_label}_ret5rank"
+if use_short_overheat_features:
+    feature_dir_label = f"{feature_dir_label}_overheatguard"
 if use_trend_quality_features:
     feature_dir_label = f"{feature_dir_label}_trendq"
 if use_clean_risk_features:
@@ -164,6 +167,7 @@ config = {
     "use_rank_momentum_features": use_rank_momentum_features,
     "use_rank_riskadj_features": use_rank_riskadj_features,
     "use_ret5_rank_features": use_ret5_rank_features,
+    "use_short_overheat_features": use_short_overheat_features,
     "use_trend_quality_features": use_trend_quality_features,
     "use_clean_risk_features": use_clean_risk_features,
     "use_multi_period_features": use_multi_period_features,

@@ -34,6 +34,7 @@
 - `v1.8.2` 修复增量扩跑的 summary 复用 bug：6 到 12 扩跑后，`summary.csv` 旧行也必须按日期匹配，不能按 `window_01` 编号误用。
 - `v1.9.0 noid-rank-ret5rank` 6 窗口明显变差：均值约 `-0.049961`，相同日期 `0/6` 胜过 `rank-replace`，不扩 12/24 窗口。
 - `v1.9.1` 新增高分好股/坏股离线差异分析：`v1.4.5` 24 窗口中，高分坏股更偏短期过热，3 日收益 rank、5MA 偏离 rank 和日内振幅更高；简单过热过滤只有极小改善，不足以直接改提交策略。
+- `v1.10.0 noid-rank-overheatguard` 准备测试 1 个短期过热保护特征：`short_overheat_guard=max(return_3_rank, close_gap_5ma_rank)`，默认先跑 6 窗口。
 
 ## 版本记录
 
@@ -78,6 +79,7 @@
 | `v1.8.2` | 修复增量扩跑 summary 匹配 | - | - | 旧 `summary.csv` 行优先按 `as_of_date + target_dates` 匹配；新窗口不会再误拿旧 `window_01` 行。 |
 | `v1.9.0` | `noid-rank-ret5rank` 单列 return_5 横截面rank | 6 | `-0.049961` | 单列 `return_5_cs_rank` 明显变差，相对同日期 `v1.4.5 rank-replace` 平均低约 `0.068518`，`0/6` 窗口胜出，不建议扩跑。 |
 | `v1.9.1` | 高分好股/坏股离线诊断 | 24 | - | 新增 `analyze_high_score_good_bad.py`，`v1.4.5` 高分坏股短期过热特征更强；简单过滤收益提升只有约 `0.000251`，只作为下一步小信号线索。 |
+| `v1.10.0` | `noid-rank-overheatguard` 短期过热保护 | 6 | 待跑 | 基于 `noid-rank-replace` 只追加 `short_overheat_guard`，用于测试高分坏股的短期过热回落线索。 |
 
 ## 后续记录规范
 

@@ -297,12 +297,40 @@ sh tune.sh v1.9.0 noid-rank-ret5rank --windows 6 --skip-final
 
 当前结论：`return_5_cs_rank` 当前实现未通过，不扩 12/24 窗口。它比 `momdelta` 和 `riskadj` 都更差，说明问题不只是“rank 差值组合方式”，而是短期收益 rank 本身可能在这段数据里强化了近期过热或固定股票池。
 
-## 11. 下一步特征方向
+## 11. 短期过热保护信号（待验证）
+
+`v1.10.0 noid-rank-overheatguard` 继续回到当前主候选 `noid-rank-replace`，只追加 1 个来自离线差异分析的小信号：
+
+- `short_overheat_guard`
+
+定义：
+
+```text
+return_3_rank = 当日过去 3 日收益在全市场中的百分位排名
+close_gap_5ma_rank = 当日收盘价相对 5 日均线偏离在全市场中的百分位排名
+short_overheat_guard = max(return_3_rank, close_gap_5ma_rank)
+```
+
+解释：
+
+- 值越接近 1：股票短期越可能处于“涨得快、离 5 日均线远”的过热状态；
+- 值越接近 0.5：没有明显短期过热；
+- 这个信号不是正向动量信号，而是把 `v1.9.1` 中高分坏股更突出的过热形态交给模型判断。
+
+它只使用当前日期及之前的收盘价，不看未来目标窗口；输入维度只增加 1 列。默认先跑 6 窗口：
+
+```bash
+sh tune.sh v1.10.0 noid-rank-overheatguard --windows 6 --skip-final
+```
+
+验收重点不是只看均值，还要看 top20 后验收益、Spearman、固定坏股池是否缓解。如果 6 窗口仍明显弱于同日期 `v1.4.5 rank-replace`，这条实现先停止；如果接近主对照，再扩 12 窗口。
+
+## 12. 下一步特征方向
 
 优先级建议：
 
 1. 把 `noid-rank-replace` 作为当前最强单模型候选，同时保留 `noid` 作为对照基线。
-2. `v1.9.1` 高分好股/坏股离线分析显示，当前高分坏股更像“短期过热后回落”：3 日收益 rank、收盘价相对 5 日均线偏离 rank、近 5 日日内振幅在 bad 组更高。后续若继续做小信号，优先把它做成过热惩罚或保护特征，而不是把短期收益 rank 当正向信号。
+2. 当前优先测试 `v1.10.0 noid-rank-overheatguard`。它比 `return_5_cs_rank` 更符合复盘结论：不是奖励短期强势，而是识别短期过热风险。
 3. 暂停 `v1.9.0 noid-rank-ret5rank`，不要扩 12/24 窗口。
 4. 暂停 `v1.8.0 noid-rank-riskadj`，不要扩 12/24 窗口。
 5. 暂停 `v1.7.0 noid-rank-momdelta`，不要扩 12/24 窗口。

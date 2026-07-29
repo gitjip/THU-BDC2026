@@ -30,6 +30,7 @@ from utils import (
 	apply_rank_momentum_features,
 	apply_rank_riskadj_features,
 	apply_ret5_rank_features,
+	apply_short_overheat_features,
 	apply_trend_quality_features,
 	engineer_features_39,
 	engineer_features_158plus39,
@@ -253,6 +254,16 @@ def preprocess_predict_data(df, stockid2idx):
 		logger.info(
 			"预测集: 已添加 return_5 横截面 rank 特征 %s 个，输入特征=%s",
 			len(ret5_rank_columns),
+			len(feature_columns),
+		)
+	if config.get('use_short_overheat_features', False):
+		processed, feature_columns, short_overheat_columns = apply_short_overheat_features(
+			processed,
+			feature_columns,
+		)
+		logger.info(
+			"预测集: 已添加短期过热保护特征 %s 个，输入特征=%s",
+			len(short_overheat_columns),
 			len(feature_columns),
 		)
 	if config.get('use_multi_period_features', False):

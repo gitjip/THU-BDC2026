@@ -96,6 +96,10 @@ RET5_RANK_FEATURE_COLUMNS = [
     'return_5_cs_rank',
 ]
 
+SHORT_OVERHEAT_FEATURE_COLUMNS = [
+    'short_overheat_guard',
+]
+
 TREND_QUALITY_FEATURE_COLUMNS = [
     'tq_mom5_vol10',
     'tq_mom10_vol20',
@@ -421,6 +425,52 @@ def add_ret5_rank_features(df):
 
 def apply_ret5_rank_features(df, feature_columns):
     processed, added_columns = add_ret5_rank_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
+
+
+def short_overheat_feature_names():
+    return list(SHORT_OVERHEAT_FEATURE_COLUMNS)
+
+
+def add_short_overheat_features(df):
+    """Add one guard feature for short-term overheated high-score stocks."""
+    required_columns = {'股票代码', '日期', '收盘'}
+    missing = required_columns - set(df.columns)
+    if missing:
+        return df.copy(), []
+
+    result = df.copy()
+    result = result.sort_values(['股票代码', '日期']).reset_index(drop=True)
+    dates = pd.to_datetime(result['日期'], errors='coerce').dt.normalize()
+    groups = result.groupby('股票代码', sort=False)
+    close = pd.to_numeric(result['收盘'], errors='coerce')
+
+    return_3 = groups['收盘'].transform(
+        lambda values: pd.to_numeric(values, errors='coerce').pct_change(3, fill_method=None)
+    )
+    rolling_ma_5 = groups['收盘'].transform(
+        lambda values: pd.to_numeric(values, errors='coerce').rolling(5, min_periods=3).mean()
+    )
+    close_gap_5ma = close / rolling_ma_5.where(rolling_ma_5.abs() > 1e-12) - 1.0
+
+    ret3_rank = return_3.groupby(dates).rank(method='average', pct=True).fillna(0.5)
+    gap5ma_rank = close_gap_5ma.groupby(dates).rank(method='average', pct=True).fillna(0.5)
+    result['short_overheat_guard'] = (
+        pd.concat([ret3_rank, gap5ma_rank], axis=1)
+        .max(axis=1)
+        .replace([np.inf, -np.inf], np.nan)
+        .clip(lower=0.0, upper=1.0)
+        .fillna(0.5)
+        .astype(float)
+    )
+
+    return result, list(SHORT_OVERHEAT_FEATURE_COLUMNS)
+
+
+def apply_short_overheat_features(df, feature_columns):
+    processed, added_columns = add_short_overheat_features(df)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns
