@@ -31,6 +31,7 @@
 - `v1.7.0 noid-rank-momdelta` 6 窗口明显变差：均值约 `-0.032498`，相同日期只在 `1/6` 窗口胜过 `rank-replace`，不扩 12/24 窗口。
 - `v1.8.0 noid-rank-riskadj` 6 窗口偏弱：均值约 `-0.019067`，相同日期只在 `2/6` 窗口胜过 `rank-replace`，不建议扩 12/24 窗口。
 - `v1.8.1` 支持同版本增量扩跑：只增大 `--windows` 并加 `--resume` 时，会按窗口日期重排旧目录，只跑新增的更早窗口。
+- `v1.8.2` 修复增量扩跑的 summary 复用 bug：6 到 12 扩跑后，`summary.csv` 旧行也必须按日期匹配，不能按 `window_01` 编号误用。
 
 ## 版本记录
 
@@ -72,6 +73,7 @@
 | `v1.7.0` | `noid-rank-momdelta` 短中期动量rank差 | 6 | `-0.032498` | 单列 `ret5_rank_minus_ret20_rank` 未通过，可能强化坏的重复选股倾向，不扩跑。 |
 | `v1.8.0` | `noid-rank-riskadj` 风险调整短期动量rank差 | 6 | `-0.019067` | 单列 `ret5_rank_minus_vol20_rank` 偏弱，相对同日期 `v1.4.5 rank-replace` 平均低约 `0.037624`，只在 `2/6` 窗口胜出，不建议扩跑。 |
 | `v1.8.1` | walk-forward 增量扩跑 | - | - | 同版本只增大 `--windows` 时，`--resume` 会按日期重排旧窗口目录，例如 6 到 12 只补跑更早 6 个窗口。 |
+| `v1.8.2` | 修复增量扩跑 summary 匹配 | - | - | 旧 `summary.csv` 行优先按 `as_of_date + target_dates` 匹配；新窗口不会再误拿旧 `window_01` 行。 |
 
 ## 后续记录规范
 

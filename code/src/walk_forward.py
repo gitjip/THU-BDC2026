@@ -510,7 +510,15 @@ def row_identity_key(row: dict) -> str:
 
 
 def existing_summary_row(existing_summary: dict[str, dict], window: WalkForwardWindow) -> dict | None:
-    return existing_summary.get(window.name) or existing_summary.get(f"date:{window_identity_key(window)}")
+    date_row = existing_summary.get(f"date:{window_identity_key(window)}")
+    if date_row:
+        return date_row
+
+    name_row = existing_summary.get(window.name)
+    if name_row and row_identity_key(name_row) == window_identity_key(window):
+        return name_row
+
+    return None
 
 
 def build_data_signature(full_df: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
