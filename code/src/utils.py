@@ -92,6 +92,16 @@ MARKET_ENV_FEATURE_COLUMNS = [
     'market_turnover_median',
 ]
 
+MARKET_ENV_LITE_FEATURE_COLUMNS = [
+    'market_return_mean',
+    'up_ratio',
+]
+
+MARKET_ENV_FEATURE_COLUMN_SETS = {
+    'full': MARKET_ENV_FEATURE_COLUMNS,
+    'lite': MARKET_ENV_LITE_FEATURE_COLUMNS,
+}
+
 RANK_MOMENTUM_FEATURE_COLUMNS = [
     'ret5_rank_minus_ret20_rank',
 ]
@@ -318,13 +328,20 @@ def apply_market_breadth_features(df, feature_columns):
     return processed, updated_columns, added_columns
 
 
-def market_env_feature_names():
-    return list(MARKET_ENV_FEATURE_COLUMNS)
+def market_env_feature_names(feature_set='full'):
+    feature_set = (feature_set or 'full').strip().lower()
+    if feature_set not in MARKET_ENV_FEATURE_COLUMN_SETS:
+        raise ValueError(f"Unsupported market env feature set: {feature_set}")
+    return list(MARKET_ENV_FEATURE_COLUMN_SETS[feature_set])
 
 
-def add_market_env_features(df):
+def add_market_env_features(df, feature_set='full'):
     """Add per-date market state features shared by all stocks on that date."""
-    required_columns = {'日期', 'return_1', 'volatility_20', '换手率'}
+    feature_set = (feature_set or 'full').strip().lower()
+    selected_columns = market_env_feature_names(feature_set)
+    required_columns = {'日期', 'return_1'}
+    if feature_set == 'full':
+        required_columns.update({'volatility_20', '换手率'})
     missing = required_columns - set(df.columns)
     if missing:
         return df.copy(), []
@@ -332,8 +349,16 @@ def add_market_env_features(df):
     result = df.copy()
     dates = pd.to_datetime(result['日期'], errors='coerce').dt.normalize()
     return_1 = pd.to_numeric(result['return_1'], errors='coerce')
-    volatility_20 = pd.to_numeric(result['volatility_20'], errors='coerce')
-    turnover = pd.to_numeric(result['换手率'], errors='coerce')
+    volatility_20 = (
+        pd.to_numeric(result['volatility_20'], errors='coerce')
+        if 'volatility_20' in result
+        else pd.Series(0.0, index=result.index)
+    )
+    turnover = (
+        pd.to_numeric(result['换手率'], errors='coerce')
+        if '换手率' in result
+        else pd.Series(0.0, index=result.index)
+    )
     valid = dates.notna()
 
     if valid.any():
@@ -367,11 +392,11 @@ def add_market_env_features(df):
             .astype(float)
         )
     result['up_ratio'] = result['up_ratio'].clip(lower=0.0, upper=1.0)
-    return result, list(MARKET_ENV_FEATURE_COLUMNS)
+    return result, selected_columns
 
 
-def apply_market_env_features(df, feature_columns):
-    processed, added_columns = add_market_env_features(df)
+def apply_market_env_features(df, feature_columns, feature_set='full'):
+    processed, added_columns = add_market_env_features(df, feature_set=feature_set)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns

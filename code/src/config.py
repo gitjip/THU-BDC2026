@@ -29,6 +29,11 @@ feature_num = os.environ.get("BDC_FEATURE_NUM", "39" if fast_dev_mode else "158+
 use_market_relative_features = _env_bool("BDC_USE_MARKET_RELATIVE_FEATURES", False)
 use_market_breadth_features = _env_bool("BDC_USE_MARKET_BREADTH_FEATURES", False)
 use_market_env_features = _env_bool("BDC_USE_MARKET_ENV_FEATURES", False)
+market_env_feature_set = os.environ.get("BDC_MARKET_ENV_FEATURE_SET", "full").strip().lower()
+if market_env_feature_set in {"", "default"}:
+    market_env_feature_set = "full"
+if market_env_feature_set not in {"full", "lite"}:
+    raise ValueError(f"Unsupported BDC_MARKET_ENV_FEATURE_SET: {market_env_feature_set}")
 use_rank_momentum_features = _env_bool("BDC_USE_RANK_MOMENTUM_FEATURES", False)
 use_rank_riskadj_features = _env_bool("BDC_USE_RANK_RISKADJ_FEATURES", False)
 use_ret5_rank_features = _env_bool("BDC_USE_RET5_RANK_FEATURES", False)
@@ -105,7 +110,8 @@ if use_market_relative_features:
 if use_market_breadth_features:
     feature_dir_label = f"{feature_dir_label}_breadth"
 if use_market_env_features:
-    feature_dir_label = f"{feature_dir_label}_marketenv"
+    env_label = "marketenv" if market_env_feature_set == "full" else f"marketenv_{market_env_feature_set}"
+    feature_dir_label = f"{feature_dir_label}_{env_label}"
 if use_rank_momentum_features:
     feature_dir_label = f"{feature_dir_label}_rankmom"
 if use_rank_riskadj_features:
@@ -168,6 +174,7 @@ config = {
     "use_market_relative_features": use_market_relative_features,
     "use_market_breadth_features": use_market_breadth_features,
     "use_market_env_features": use_market_env_features,
+    "market_env_feature_set": market_env_feature_set,
     "use_rank_momentum_features": use_rank_momentum_features,
     "use_rank_riskadj_features": use_rank_riskadj_features,
     "use_ret5_rank_features": use_ret5_rank_features,

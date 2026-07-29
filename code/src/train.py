@@ -151,13 +151,16 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
         )
 
     if config.get('use_market_env_features', False):
+        market_env_feature_set = config.get('market_env_feature_set', 'full')
         processed, feature_columns, market_env_columns = apply_market_env_features(
             processed,
             feature_columns,
+            feature_set=market_env_feature_set,
         )
         logger.info(
-            "%s: 已添加市场环境特征 %s 个，输入特征=%s",
+            "%s: 已添加市场环境特征 set=%s, 列=%s 个，输入特征=%s",
             desc,
+            market_env_feature_set,
             len(market_env_columns),
             len(feature_columns),
         )
