@@ -98,6 +98,27 @@ sh tune.sh v1.12.1 ensemble-lowoverheat --windows 24 --skip-final
 
 注意：它不是和 Transformer 的严格架构对照，因为 LightGBM 第一版使用 120 个训练目标日且不做每日股票抽样。这样做是因为 LightGBM 训练很快，第一步更关心“树模型方向是否值得继续”，而不是只比较同预算下的架构差异。
 
+## v1.12.2 门控诊断
+
+`v1.12.2` 新增 `evaluate_strategy_gate.py`，不训练、不预测，只复用已有 24 窗口结果，评估什么时候从 `v1.4.5 rank-replace Transformer` 切到防守候选：
+
+```bash
+.venv/bin/python code/src/evaluate_strategy_gate.py \
+  experiments/v1.4.5 \
+  experiments/v1.12.0 \
+  experiments/v1.12.1 \
+  --output-dir experiments/analysis/strategy_gate_v1.4.5_vs_v1.12.0_vs_v1.12.1
+```
+
+结果：
+
+- 最好规则是当 Transformer top5 平均过热 rank `>= 0.70` 时切到 `v1.12.1 ensemble-lowoverheat`；
+- 24 窗口均值约从 `0.017557` 提升到 `0.029874`；
+- 正分窗口从 `14/24` 提升到 `17/24`；
+- 但最差窗口仍是 `-0.066987`，没有通过“最差窗口优于主线”的验收标准。
+
+结论：LightGBM 和低过热集成仍有防守价值，但当前更适合作为门控诊断对象。第一版门控规则不能直接接正式预测；后续应重点寻找能识别最差窗口的历史信号。
+
 验收：
 
 - 先与同日期 `v1.4.5 noid-rank-replace` 配对比较；
