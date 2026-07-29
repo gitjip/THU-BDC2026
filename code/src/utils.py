@@ -92,6 +92,10 @@ RANK_RISKADJ_FEATURE_COLUMNS = [
     'ret5_rank_minus_vol20_rank',
 ]
 
+RET5_RANK_FEATURE_COLUMNS = [
+    'return_5_cs_rank',
+]
+
 TREND_QUALITY_FEATURE_COLUMNS = [
     'tq_mom5_vol10',
     'tq_mom10_vol20',
@@ -386,6 +390,37 @@ def add_rank_riskadj_features(df):
 
 def apply_rank_riskadj_features(df, feature_columns):
     processed, added_columns = add_rank_riskadj_features(df)
+    updated_columns = list(feature_columns)
+    updated_columns.extend(column for column in added_columns if column not in updated_columns)
+    return processed, updated_columns, added_columns
+
+
+def ret5_rank_feature_names():
+    return list(RET5_RANK_FEATURE_COLUMNS)
+
+
+def add_ret5_rank_features(df):
+    """Add the current-date cross-sectional rank of 5-day return."""
+    required_columns = {'日期', 'return_5'}
+    missing = required_columns - set(df.columns)
+    if missing:
+        return df.copy(), []
+
+    result = df.copy()
+    dates = pd.to_datetime(result['日期'], errors='coerce').dt.normalize()
+    return_5 = pd.to_numeric(result['return_5'], errors='coerce')
+    result['return_5_cs_rank'] = (
+        return_5.groupby(dates).rank(method='average', pct=True)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.5)
+        .astype(float)
+    )
+
+    return result, list(RET5_RANK_FEATURE_COLUMNS)
+
+
+def apply_ret5_rank_features(df, feature_columns):
+    processed, added_columns = add_ret5_rank_features(df)
     updated_columns = list(feature_columns)
     updated_columns.extend(column for column in added_columns if column not in updated_columns)
     return processed, updated_columns, added_columns

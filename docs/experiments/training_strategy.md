@@ -233,6 +233,8 @@ sh tune.sh v1.3.1 noid-rank-replace --windows 3 --skip-final
 
 `v1.4.9 noid-rank-trendq` 追加趋势质量特征后，最新 3 窗口均值约 `-0.067912`，相对同日期 `v1.4.5 rank-replace` 平均低约 `0.048780`，且 3 个窗口都未胜出。这个结果更像特征噪声或重复信号，不像训练过程欠优化；不建议用更多 epoch 或更大模型去补救这组特征。
 
+`v1.9.0 noid-rank-ret5rank` 是下一轮更小步的横截面信号：只在 `noid-rank-replace` 上追加 `return_5_cs_rank`，用于判断前两个 rank 差信号失败是否来自组合方式，而不是 5 日收益横截面位置本身。
+
 ## 12. v1.5.0 排序监督信号实验
 
 当前默认 `WeightedRankingLoss` 的 listwise 部分会对真实 5 日收益率做 softmax。由于单个窗口内的收益率通常只是几个百分点，默认温度 `1.0` 会让目标分布接近均匀，真实第一名和普通股票在 listwise loss 中的差异不够明显。pairwise loss 仍会提供排序信号，但它也在尝试学习完整横截面排序，而最终提交只关心前 5 只。

@@ -67,6 +67,7 @@ sh tune.sh quick --skip-final --resume
 | `noid-rank-breadth` | rank替代+市场宽度 | 3 | 38(no instrument, rank replace)+1 breadth=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-momdelta` | rank替代+短中期动量rank差 | 6 | 38(no instrument, rank replace)+1 momdelta=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-rank-riskadj` | rank替代+风险调整短期动量rank差 | 6 | 38(no instrument, rank replace)+1 riskadj=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
+| `noid-rank-ret5rank` | rank替代+return_5单列rank | 6 | 38(no instrument, rank replace)+1 ret5rank=39 | 45 | 60 | 120 | d_model=96, layers=2 | 30 |
 | `noid-stable` | 去编号+正则化对照 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, dropout=0.2 | 30 |
 | `noid-full` | 去编号完整数据对照 | 3 | 39(no instrument) | 45 | 不限制 | 不抽样 | d_model=96, layers=2 | 30 |
 | `noid-lowvol` | 去编号+低波动后处理 | 3 | 39(no instrument) | 45 | 60 | 120 | d_model=96, layers=2, low-vol selection | 30 |
@@ -76,7 +77,7 @@ sh tune.sh quick --skip-final --resume
 | `large` | 慢速候选复核 | 3 | 39 | 45 | 60 | 120 | d_model=96, layers=3, ff=512 | 20 |
 | `full` | 冲分前复核 | 3 | 配置默认 | 配置默认 | 不限制 | 不抽样 | 配置默认 | 6 |
 
-这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-rank-breadth`、`noid-rank-momdelta`、`noid-rank-riskadj`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
+这些档位都默认使用 `plateau` 学习率调度和早停。`quick` 的早停耐心值为 2，`balanced`、`noid`、`noid-marketrel`、`noid-rank`、`noid-rank-lite`、`noid-rank-replace`、`noid-rank-sharp`、`noid-rank-cleanrisk`、`noid-rank-multiperiod`、`noid-rank-breadth`、`noid-rank-momdelta`、`noid-rank-riskadj`、`noid-rank-ret5rank`、`noid-stable`、`noid-full`、`noid-lowvol`、`smooth`、`stable`、`large` 为 5，`full` 为 3；也就是说表里的 epoch 是上限，不一定都会跑完。`quick` 用于快速暴露代码问题；`noid` 主线和 rank/marketrel/lowvol 等特征或后处理对照统一使用 30 epoch 上限，减少“某个特征只是多训练了几轮”的干扰。`balanced/smooth/stable` 保持 15 epoch，主要作为早期含 `instrument` 的轻量对照。
 
 `noid` 源自 `balanced` 小模型配置，但当前属于主线对照档：默认 `BDC_USE_INSTRUMENT_FEATURE=0`，从模型输入特征里移除 `instrument`，并使用 30 epoch 上限。股票代码仍用于分组、构造序列和输出结果，但模型不能把股票编号当连续数值直接学习。如果要重新严格比较是否保留 `instrument`，应给 `balanced` 显式设置相同 epoch 上限。
 
@@ -103,6 +104,8 @@ sh tune.sh quick --skip-final --resume
 `noid-rank-momdelta` 基于 `noid-rank-replace`，只追加 1 个短中期动量 rank 差信号 `ret5_rank_minus_ret20_rank`：当日 `return_5` 横截面百分位排名减去过去 20 日收益横截面百分位排名。它用于测试“短期相对强度是否高于中期相对强度”这类更贴近横截面排序的小信号，默认先跑 6 窗口。
 
 `noid-rank-riskadj` 基于 `noid-rank-replace`，只追加 1 个风险调整短期动量 rank 差信号 `ret5_rank_minus_vol20_rank`：当日 `return_5` 横截面百分位排名减去 `volatility_20` 横截面百分位排名。它用于测试“短期强但不是纯高波动”的小信号，默认先跑 6 窗口。
+
+`noid-rank-ret5rank` 基于 `noid-rank-replace`，只追加 1 个最小短期相对强弱信号 `return_5_cs_rank`：当日 `return_5` 在横截面中的百分位排名。它不再做 rank 差值或风险扣分，用于判断失败是否来自前两个小信号的组合方式，而不是 `return_5` rank 本身。
 
 `noid-stable` 是 `noid` 的正则化对照：继续移除 `instrument`，同时设置 `dropout=0.2`、`weight_decay=1e-4`。它用于检查 `noid` 倾向高波动股票的问题是否能通过更强正则化缓解。
 

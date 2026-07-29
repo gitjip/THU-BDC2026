@@ -262,19 +262,46 @@ ret5_rank_minus_vol20_rank = ret5_rank - vol20_rank
 
 当前结论：`ret5_rank_minus_vol20_rank` 当前实现未通过，不建议扩 12/24 窗口。它比 `momdelta` 稍好，但仍没有接近主对照。
 
-## 10. 下一步特征方向
+## 10. return_5 单列横截面 rank（待测）
+
+`v1.9.0 noid-rank-ret5rank` 继续回到当前主候选 `noid-rank-replace`，只追加 1 个最小短期相对强弱信号：
+
+- `return_5_cs_rank`
+
+定义：
+
+```text
+return_5_cs_rank = 当日 return_5 在全市场中的百分位排名
+```
+
+这个实验的目的不是扩大 rank 替换范围，而是拆开前两个失败小信号：
+
+- `ret5_rank_minus_ret20_rank` 可能失败在“短期减中期”的组合方式；
+- `ret5_rank_minus_vol20_rank` 可能失败在“短期减波动”的风险惩罚方式；
+- 单独测试 `return_5_cs_rank` 可以判断 5 日收益横截面位置本身是否有用。
+
+它只使用当前日期及之前已经算出的 `return_5`，不看未来目标窗口；输入维度只增加 1 列。默认先跑 6 窗口：
+
+```bash
+sh tune.sh v1.9.0 noid-rank-ret5rank --windows 6 --skip-final
+```
+
+验收时优先比较同日期 `v1.4.5 noid-rank-replace`：6 窗口均值、最差窗口、胜出窗口数、Spearman、top20/top50 后验收益。如果明显变差，结论仍写成“当前实现未通过”，不要把整个横截面小信号方向永久否定。
+
+## 11. 下一步特征方向
 
 优先级建议：
 
 1. 把 `noid-rank-replace` 作为当前最强单模型候选，同时保留 `noid` 作为对照基线。
-2. 暂停 `v1.8.0 noid-rank-riskadj`，不要扩 12/24 窗口。
-3. 暂停 `v1.7.0 noid-rank-momdelta`，不要扩 12/24 窗口。
-4. 暂停 `v1.6.2 noid-rank-breadth` 单列市场宽度实现，不扩 12/24 窗口。
-5. 暂停 `v1.6.1 noid-rank-multiperiod`，不要继续扩跑。
-6. 暂停 `v1.6.0 noid-rank-cleanrisk`，不要继续扩跑。
-7. 暂停 `noid-rank-trendq`，除非先重新设计为更少、更正交的单个特征。
-8. 暂停第一版市场相对特征，不扩 12 窗口。
-9. 暂停继续拆 rank 替换组；不要简单扩大 rank 列表。
-10. 暂缓行业/板块特征，除非有可靠行业映射；用股票代码前缀硬猜行业容易引入伪规律。
+2. 先测 `v1.9.0 noid-rank-ret5rank`，因为它比前两个 rank 差信号更小、更容易解释。
+3. 暂停 `v1.8.0 noid-rank-riskadj`，不要扩 12/24 窗口。
+4. 暂停 `v1.7.0 noid-rank-momdelta`，不要扩 12/24 窗口。
+5. 暂停 `v1.6.2 noid-rank-breadth` 单列市场宽度实现，不扩 12/24 窗口。
+6. 暂停 `v1.6.1 noid-rank-multiperiod`，不要继续扩跑。
+7. 暂停 `v1.6.0 noid-rank-cleanrisk`，不要继续扩跑。
+8. 暂停 `noid-rank-trendq`，除非先重新设计为更少、更正交的单个特征。
+9. 暂停第一版市场相对特征，不扩 12 窗口。
+10. 暂停继续拆 rank 替换组；不要简单扩大 rank 列表。
+11. 暂缓行业/板块特征，除非有可靠行业映射；用股票代码前缀硬猜行业容易引入伪规律。
 
 新增特征遵循 [实验纪律与分级验证](experiment_protocol.md)：优先单列小信号，先跑 6 窗口，接近主对照再扩到 12/24。弱于主对照的实验应停止扩跑，但结论写成“当前实现未通过”，避免过早否定整个方向。

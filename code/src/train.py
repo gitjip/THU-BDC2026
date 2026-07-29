@@ -17,6 +17,7 @@ from utils import apply_trend_quality_features
 from utils import apply_cross_sectional_rank_features
 from utils import apply_rank_momentum_features
 from utils import apply_rank_riskadj_features
+from utils import apply_ret5_rank_features
 from utils import apply_clean_risk_features
 from utils import apply_multi_period_features
 import joblib
@@ -198,6 +199,18 @@ def _preprocess_common(df, stockid2idx, desc, drop_small_open=True):
             "%s: 已添加横截面风险调整动量特征 %s 个，输入特征=%s",
             desc,
             len(rank_riskadj_columns),
+            len(feature_columns),
+        )
+
+    if config.get('use_ret5_rank_features', False):
+        processed, feature_columns, ret5_rank_columns = apply_ret5_rank_features(
+            processed,
+            feature_columns,
+        )
+        logger.info(
+            "%s: 已添加 return_5 横截面 rank 特征 %s 个，输入特征=%s",
+            desc,
+            len(ret5_rank_columns),
             len(feature_columns),
         )
 
