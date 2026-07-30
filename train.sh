@@ -13,6 +13,28 @@ set_default() {
   fi
 }
 
+dry_run_requested() {
+  for arg in "$@"; do
+    if [ "$arg" = "--dry-run" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+submission_strength() {
+  value="${BDC_SUBMISSION_STRENGTH:-strong}"
+  case "$value" in
+    validated|strong|max)
+      printf "%s" "$value"
+      ;;
+    *)
+      echo "未知 BDC_SUBMISSION_STRENGTH=$value，可选 validated、strong、max。" >&2
+      exit 2
+      ;;
+  esac
+}
+
 apply_rank_replace_defaults() {
   model_dir="./model/rank_replace"
   if [ -n "$debug_arg" ]; then
@@ -42,15 +64,63 @@ apply_rank_replace_defaults() {
     set_default BDC_EARLY_STOPPING_PATIENCE 5
     set_default BDC_NUM_PROCESSES 6
   fi
+  set_default BDC_MODEL_KIND transformer
   set_default BDC_OUTPUT_DIR "$model_dir"
+  apply_rank_feature_defaults
+  apply_transformer_optim_defaults
+}
+
+apply_lgbm_rank_replace_defaults() {
+  model_dir="./model/submission/lgbm_rank_replace"
+  if [ -n "$debug_arg" ]; then
+    model_dir="./model/ensemble_debug/lgbm_rank_replace"
+    set_default BDC_FAST_DEV 1
+    set_default BDC_SEQUENCE_LENGTH 30
+    set_default BDC_TRAIN_TARGET_DAYS 24
+    set_default BDC_LGBM_N_ESTIMATORS 120
+    set_default BDC_NUM_PROCESSES 4
+  else
+    strength="$(submission_strength)"
+    set_default BDC_SEQUENCE_LENGTH 45
+    case "$strength" in
+      validated)
+        set_default BDC_TRAIN_TARGET_DAYS 120
+        set_default BDC_LGBM_N_ESTIMATORS 300
+        ;;
+      strong)
+        set_default BDC_TRAIN_TARGET_DAYS 240
+        set_default BDC_LGBM_N_ESTIMATORS 600
+        ;;
+      max)
+        set_default BDC_TRAIN_TARGET_DAYS 0
+        set_default BDC_LGBM_N_ESTIMATORS 900
+        ;;
+    esac
+    set_default BDC_NUM_PROCESSES 6
+  fi
+  set_default BDC_MODEL_KIND lgbm
+  set_default BDC_OUTPUT_DIR "$model_dir"
+  set_default BDC_MAX_STOCKS_PER_DAY 0
+  apply_rank_feature_defaults
+  set_default BDC_LGBM_LEARNING_RATE 0.03
+  set_default BDC_LGBM_NUM_LEAVES 31
+  set_default BDC_LGBM_MIN_CHILD_SAMPLES 20
+  set_default BDC_LGBM_SUBSAMPLE 0.9
+  set_default BDC_LGBM_COLSAMPLE_BYTREE 0.9
+  set_default BDC_LGBM_REG_ALPHA 0.0
+  set_default BDC_LGBM_REG_LAMBDA 1.0
+  set_default BDC_LGBM_NUM_THREADS 8
+  set_default BDC_TORCH_NUM_THREADS 4
+  set_default BDC_TENSORBOARD 0
+}
+
+apply_rank_feature_defaults() {
   set_default BDC_FEATURE_NUM 39
   set_default BDC_VAL_DAYS 5
-  set_default BDC_LEARNING_RATE 3e-5
-  set_default BDC_WEIGHT_DECAY 1e-5
-  set_default BDC_DROPOUT 0.1
   set_default BDC_USE_INSTRUMENT_FEATURE 0
   set_default BDC_USE_MARKET_RELATIVE_FEATURES 0
   set_default BDC_USE_MARKET_BREADTH_FEATURES 0
+  set_default BDC_USE_MARKET_ENV_FEATURES 0
   set_default BDC_USE_RANK_MOMENTUM_FEATURES 0
   set_default BDC_USE_RANK_RISKADJ_FEATURES 0
   set_default BDC_USE_RET5_RANK_FEATURES 0
@@ -60,6 +130,13 @@ apply_rank_replace_defaults() {
   set_default BDC_USE_MULTI_PERIOD_FEATURES 0
   set_default BDC_USE_CROSS_SECTIONAL_RANKS 1
   set_default BDC_CROSS_SECTIONAL_RANK_MODE replace
+  set_default BDC_CROSS_SECTIONAL_RANK_REPLACE_SET default
+}
+
+apply_transformer_optim_defaults() {
+  set_default BDC_LEARNING_RATE 3e-5
+  set_default BDC_WEIGHT_DECAY 1e-5
+  set_default BDC_DROPOUT 0.1
   set_default BDC_OPTIMIZER adamw
   set_default BDC_LR_SCHEDULER plateau
   set_default BDC_LR_PATIENCE 1
@@ -74,39 +151,39 @@ apply_rank_replace_defaults() {
   set_default BDC_TENSORBOARD 0
 }
 
-dry_run_requested() {
-  for arg in "$@"; do
-    if [ "$arg" = "--dry-run" ]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-print_rank_replace_dry_run() {
-  echo "提交训练模式: rank-replace"
-  for key in \
-    BDC_OUTPUT_DIR BDC_FEATURE_NUM BDC_SEQUENCE_LENGTH BDC_TRAIN_TARGET_DAYS BDC_VAL_DAYS \
-    BDC_MAX_STOCKS_PER_DAY BDC_D_MODEL BDC_NHEAD BDC_NUM_LAYERS BDC_DIM_FEEDFORWARD \
-    BDC_BATCH_SIZE BDC_NUM_EPOCHS BDC_LEARNING_RATE BDC_WEIGHT_DECAY BDC_DROPOUT \
-    BDC_USE_INSTRUMENT_FEATURE BDC_USE_MARKET_RELATIVE_FEATURES BDC_USE_MARKET_BREADTH_FEATURES \
-    BDC_USE_RANK_MOMENTUM_FEATURES BDC_USE_RANK_RISKADJ_FEATURES BDC_USE_RET5_RANK_FEATURES \
-    BDC_USE_SHORT_OVERHEAT_FEATURES \
-    BDC_USE_TREND_QUALITY_FEATURES \
-    BDC_USE_CLEAN_RISK_FEATURES \
-    BDC_USE_MULTI_PERIOD_FEATURES \
-    BDC_USE_CROSS_SECTIONAL_RANKS BDC_CROSS_SECTIONAL_RANK_MODE BDC_LR_SCHEDULER \
-    BDC_EARLY_STOPPING_PATIENCE BDC_LOSS_TEMPERATURE BDC_LOSS_TARGET_TEMPERATURE \
-    BDC_NUM_PROCESSES BDC_TORCH_NUM_THREADS
-  do
+print_env_block() {
+  for key in "$@"; do
     eval "value=\${$key:-}"
     echo "  $key=$value"
   done
 }
 
+print_rank_replace_dry_run() {
+  echo "提交训练模式: rank-replace"
+  print_env_block \
+    BDC_OUTPUT_DIR BDC_MODEL_KIND BDC_FEATURE_NUM BDC_SEQUENCE_LENGTH \
+    BDC_TRAIN_TARGET_DAYS BDC_VAL_DAYS BDC_MAX_STOCKS_PER_DAY \
+    BDC_D_MODEL BDC_NHEAD BDC_NUM_LAYERS BDC_DIM_FEEDFORWARD \
+    BDC_BATCH_SIZE BDC_NUM_EPOCHS BDC_LEARNING_RATE BDC_WEIGHT_DECAY \
+    BDC_DROPOUT BDC_USE_INSTRUMENT_FEATURE BDC_USE_CROSS_SECTIONAL_RANKS \
+    BDC_CROSS_SECTIONAL_RANK_MODE BDC_LR_SCHEDULER \
+    BDC_EARLY_STOPPING_PATIENCE BDC_NUM_PROCESSES BDC_TORCH_NUM_THREADS
+}
+
+print_lgbm_dry_run() {
+  echo "提交训练模式: lgbm-rank-replace"
+  print_env_block \
+    BDC_OUTPUT_DIR BDC_MODEL_KIND BDC_FEATURE_NUM BDC_SEQUENCE_LENGTH \
+    BDC_TRAIN_TARGET_DAYS BDC_VAL_DAYS BDC_MAX_STOCKS_PER_DAY \
+    BDC_USE_INSTRUMENT_FEATURE BDC_USE_CROSS_SECTIONAL_RANKS \
+    BDC_CROSS_SECTIONAL_RANK_MODE BDC_LGBM_N_ESTIMATORS \
+    BDC_LGBM_LEARNING_RATE BDC_LGBM_NUM_LEAVES \
+    BDC_LGBM_MIN_CHILD_SAMPLES BDC_LGBM_NUM_THREADS BDC_NUM_PROCESSES
+}
+
 print_single_dry_run() {
   echo "提交训练模式: single"
-  echo "说明: 使用 code/src/train.py 的原始单模型配置，不套用 rank-replace 默认参数"
+  echo "说明: 使用 code/src/train.py 的原始单模型配置，不套用正式 rank-replace 默认参数"
   if [ -n "$debug_arg" ]; then
     echo "调试模式: 开启"
   fi
@@ -135,10 +212,14 @@ else
   exit 1
 fi
 
-submission_mode="${BDC_SUBMISSION_MODE:-rank-replace}"
+submission_mode="${BDC_SUBMISSION_MODE:-ensemble-gate}"
 case "${1:-}" in
-  ensemble|--ensemble)
-    submission_mode="ensemble"
+  ensemble|ensemble-gate|ensemble_gate|gate|--ensemble|--ensemble-gate|--gate)
+    submission_mode="ensemble-gate"
+    shift
+    ;;
+  lgbm|rank-lgbm|lgbm-rank-replace|--lgbm|--rank-lgbm)
+    submission_mode="lgbm"
     shift
     ;;
   single|--single)
@@ -150,6 +231,24 @@ case "${1:-}" in
     shift
     ;;
 esac
+
+if [ "$submission_mode" = "ensemble-gate" ]; then
+  if [ -n "$debug_arg" ]; then
+    set -- "$debug_arg" "$@"
+  fi
+  # shellcheck disable=SC2086
+  exec $python_bin code/src/train_ensemble.py "$@"
+fi
+
+if [ "$submission_mode" = "lgbm" ]; then
+  apply_lgbm_rank_replace_defaults
+  if dry_run_requested "$@"; then
+    print_lgbm_dry_run
+    exit 0
+  fi
+  # shellcheck disable=SC2086
+  exec $python_bin code/src/train_lgbm.py
+fi
 
 if [ "$submission_mode" = "rank-replace" ]; then
   apply_rank_replace_defaults
@@ -170,10 +269,5 @@ if [ "$submission_mode" = "single" ]; then
   exec $python_bin code/src/train.py "$@"
 fi
 
-if [ -n "$debug_arg" ]; then
-  # shellcheck disable=SC2086
-  exec $python_bin code/src/train_ensemble.py "$debug_arg" "$@"
-fi
-
-# shellcheck disable=SC2086
-exec $python_bin code/src/train_ensemble.py "$@"
+echo "未知 BDC_SUBMISSION_MODE=$submission_mode，可选 ensemble-gate、lgbm、rank-replace、single。" >&2
+exit 2

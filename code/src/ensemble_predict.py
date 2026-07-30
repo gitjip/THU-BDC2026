@@ -12,6 +12,7 @@ import pandas as pd
 from config import config
 from data_utils import load_stock_data, normalize_stock_codes, setup_logging
 from ensemble_config import (
+    ENSEMBLE_GATE_OVERHEAT_THRESHOLD,
     ENSEMBLE_SELECTION_STRATEGY,
     ENSEMBLE_VOL_WINDOW,
     get_submission_ensemble_sources,
@@ -96,8 +97,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gate-overheat-threshold",
         type=float,
-        default=float(os.environ.get("BDC_GATE_OVERHEAT_THRESHOLD", 0.70)),
-        help="过热门控阈值，仅 ensemble_gate_overheat_top5 使用，默认 0.70",
+        default=float(
+            os.environ.get(
+                "BDC_GATE_OVERHEAT_THRESHOLD", ENSEMBLE_GATE_OVERHEAT_THRESHOLD
+            )
+        ),
+        help="过热门控阈值，仅 ensemble_gate_overheat_top5 使用，默认 0.65",
     )
     parser.add_argument("--debug", action="store_true", help="使用 debug 集成模型目录")
     parser.add_argument(
@@ -124,6 +129,15 @@ def source_env(source_env: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def source_predict_script(env: dict[str, str]) -> str:
+    model_kind = env.get("BDC_MODEL_KIND", "transformer").strip().lower()
+    if model_kind == "lgbm":
+        return "code/src/predict_lgbm.py"
+    if model_kind in {"", "transformer"}:
+        return "code/src/predict.py"
+    raise ValueError(f"Unsupported BDC_MODEL_KIND for ensemble source: {model_kind}")
+
+
 def add_optional_date_args(command: list[str], args: argparse.Namespace) -> None:
     command.extend(["--submission-date", args.submission_date])
     if args.target_start_date:
@@ -144,7 +158,7 @@ def run_source_predict(
     result_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
-        "code/src/predict.py",
+        source_predict_script(env),
         "--output",
         str(result_path),
         "--scores-output",
@@ -156,7 +170,12 @@ def run_source_predict(
 
     logger.info("")
     logger.info("=" * 72)
-    logger.info("源模型预测: %s -> %s", label, scores_path)
+    logger.info(
+        "源模型预测: %s | kind=%s -> %s",
+        label,
+        env.get("BDC_MODEL_KIND", "transformer"),
+        scores_path,
+    )
     logger.info("=" * 72)
     logger.info("运行命令: %s", " ".join(command))
     if args.dry_run:
@@ -239,6 +258,8 @@ def main() -> None:
     }
     sources = get_submission_ensemble_sources(debug=debug)
     logger.info("提交集成预测模式: %s", "debug" if debug else "official")
+    logger.info("集成策略: %s", args.ensemble_selection_strategy)
+    logger.info("过热门控阈值: %s", args.gate_overheat_threshold)
     logger.info("最终输出: %s", output_path)
     logger.info("完整候选排名输出: %s", scores_output_path)
 

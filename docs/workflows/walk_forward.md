@@ -94,7 +94,7 @@ sh tune.sh quick --skip-final --resume
 
 `noid-rank-lite` 是 `noid-rank-replace` 的小范围版本：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`、`BDC_CROSS_SECTIONAL_RANK_REPLACE_SET=lite`，只替换开高低收、成交量、成交额和涨跌额 7 个原始价量尺度列。
 
-`noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。`v1.4.7/8` 公平预算复核后，它是当前最强单模型候选，也是默认提交配置。
+`noid-rank-replace` 是 `noid-rank` 之后的更严格对照：默认 `BDC_CROSS_SECTIONAL_RANK_MODE=replace`，只用 rank 列替换部分绝对量价尺度特征，不追加额外输入维度。它仍是 Transformer 单模型保底配置；`v1.14.0` 起正式默认提交改为基于它和 LightGBM 的 `ensemble-gate`。
 
 `noid-rank-sharp` 基于 `noid-rank-replace`，只设置 `BDC_LOSS_TARGET_TEMPERATURE=0.05`。它不改特征、不改模型、不改训练预算，目的是让 listwise loss 中的真实收益分布不再接近均匀，从而强化“真实高收益股票应排到前面”的监督信号。新实现应先跑 6 窗口探索；如果均值、最差窗口、top20/top50 后验收益没有接近或超过 `noid-rank-replace`，不要扩到 12/24 窗口。
 
@@ -114,7 +114,7 @@ sh tune.sh quick --skip-final --resume
 
 `noid-rank-marketenv-roll` 继续拆小市场环境方向，只追加 `mkt_ret_mean_5_lag1` 和 `mkt_up_ratio_5_lag1` 两列：先计算每日市场收益均值和上涨比例，再滞后 1 个交易日并取过去 5 个交易日均值。`v1.11.3` 已跑 6 窗口，仍明显弱于同日期 `rank-replace`；这个 profile 保留用于复现，不建议扩 12/24。
 
-`noid-rank-lgbm` 是第一版 LightGBM 表格模型候选。它复用当前 `rank-replace` 特征工程，但不构造 Transformer 序列，改为每个 `股票-日期` 一行，直接回归未来 5 日收益并按预测分数排序。第一版使用 120 个训练目标日和全股票训练，目的是快速判断树模型方向是否值得继续；正式提交默认仍不使用它。`v1.12.0` 6 窗口 top5 均值低于 `rank-replace`，但训练很快且 top20/top50 诊断略好，后续更适合试 `LGBMRanker` 或候选池集成。
+`noid-rank-lgbm` 是第一版 LightGBM 表格模型候选。它复用当前 `rank-replace` 特征工程，但不构造 Transformer 序列，改为每个 `股票-日期` 一行，直接回归未来 5 日收益并按预测分数排序。第一版使用 120 个训练目标日和全股票训练，目的是快速判断树模型方向是否值得继续；`v1.13.2/3/4` 同口径复现后，它已作为正式 `ensemble-gate` 的防守源和第一回退。
 
 `noid-rank-momdelta` 基于 `noid-rank-replace`，只追加 1 个短中期动量 rank 差信号 `ret5_rank_minus_ret20_rank`：当日 `return_5` 横截面百分位排名减去过去 20 日收益横截面百分位排名。它用于测试“短期相对强度是否高于中期相对强度”这类更贴近横截面排序的小信号，默认先跑 6 窗口。
 
@@ -134,7 +134,7 @@ sh tune.sh quick --skip-final --resume
 
 `ensemble-lowoverheat` 不训练新模型，默认通过 `BDC_ENSEMBLE_SOURCES=v1.4.5,v1.12.0` 复用 rank-replace Transformer 与 LightGBM。每个源模型先各自输出 top5，再取两者 top5 并集，最后按最近 5/10 日收益过热程度从低到高选回 5 只。它针对的是 `v1.12.0` 的现象：LGBM 在 rank-replace 低分窗口里有防守价值，但不能牺牲高分窗口的进攻收益。`v1.12.1` 24 窗口实际均值约 `0.014789`，低于 `rank-replace`，但最差窗口改善；因此它只是防守候选，不是默认提交主线。
 
-`ensemble-gate-overheat` 不训练新模型，默认通过 `BDC_ENSEMBLE_SOURCES=v1.4.5,v1.12.0` 复用 rank-replace Transformer 与 LightGBM。它先计算第一个源模型 top5 的 `overheat_rank` 均值；若均值 `>= BDC_GATE_OVERHEAT_THRESHOLD`，默认 `0.70`，则切到 `ensemble_low_overheat_top5` 防守选择，否则保留第一个源模型原始 top5。它用于把 `v1.12.3` 的离线门控候选接入 walk-forward 复现，不改变正式提交默认路径。
+`ensemble-gate-overheat` 不训练新模型，默认通过 `BDC_ENSEMBLE_SOURCES` 复用 rank-replace Transformer 与 LightGBM。它先计算第一个源模型 top5 的 `overheat_rank` 均值；若均值 `>= BDC_GATE_OVERHEAT_THRESHOLD`，则切到 `ensemble_low_overheat_top5` 防守选择，否则保留第一个源模型原始 top5。`v1.13.4` 同口径验证使用阈值 `0.65` 后成为正式默认候选；调参时仍应显式记录源实验和阈值。
 
 `smooth` 不是新模型，只是 `balanced` 的优化器对照：默认 `BDC_OPTIMIZER=lookahead`、`BDC_LOOKAHEAD_K=5`、`BDC_LOOKAHEAD_ALPHA=0.5`。它用于判断 Lookahead 是否能降低分数震荡和改善最差窗口。
 
@@ -267,7 +267,7 @@ sh tune.sh v1.3.8 noid-lowvol --windows 12 --skip-final --reuse-models-from v1.2
 sh tune.sh v1.3.9 ensemble-lowvol --windows 12 --skip-final
 ```
 
-这个命令默认复用 `v1.2.13 noid` 和 `v1.3.2 noid-rank-replace` 的已训练窗口模型，不重新训练。
+这个历史命令默认复用 `v1.2.13 noid` 和 `v1.3.2 noid-rank-replace` 的已训练窗口模型，不重新训练。
 
 `v1.3.9 ensemble-lowvol` 已完成 12 窗口验证，均值约 `0.030457`，最差窗口约 `-0.032689`，高于 `v1.2.13 noid` 的均值 `0.024783` 和最差窗口 `-0.063489`。这说明“两模型 top5 并集 + 低波动重排”比单模型低波动后处理更有希望。
 
@@ -307,7 +307,7 @@ BDC_ENSEMBLE_SOURCES=v1.4.7,v1.4.5 sh tune.sh v1.4.8 ensemble-lowvol --windows 2
 
 比较多个实验时，`validate_experiments.py` 会额外输出 `config_comparison.csv`，并在 `readme.md` 里提示关键训练预算是否不一致。若 `BDC_NUM_EPOCHS`、训练目标日、每日股票数、模型规模等不同，应先把结果当作参考，避免直接下结论。
 
-下一步不再推荐扩跑 `v1.6.0 noid-rank-cleanrisk` 或 `v1.6.1 noid-rank-multiperiod`。两者的 24 窗口结果都明显差于 `rank-replace`，说明当前不要继续简单追加风险或多周期基础特征。若继续做特征，只做 `v1.6.2 noid-rank-breadth` 这种单个、可解释、和已有失败方向不重复的小信号。默认提交主线仍保持 `noid-rank-replace`。
+下一步不再推荐扩跑 `v1.6.0 noid-rank-cleanrisk` 或 `v1.6.1 noid-rank-multiperiod`。两者的 24 窗口结果都明显差于 `rank-replace`，说明当前不要继续简单追加风险或多周期基础特征。若继续做特征，只做 `v1.6.2 noid-rank-breadth` 这种单个、可解释、和已有失败方向不重复的小信号。单模型对照仍以 `noid-rank-replace` 为主；正式提交默认已在 `v1.14.0` 切到 `ensemble-gate`。
 
 新增标准档位时，只需要在 `tune.sh` 的 `case "$profile" in` 配置区增加一个分支，并用非 `--` 形式调用，例如 `sh tune.sh v1.3.0 my-profile --skip-final`。如果要新增 `--my-profile` 这类别名，才需要额外改上方参数解析。
 

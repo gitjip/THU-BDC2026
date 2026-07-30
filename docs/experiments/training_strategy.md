@@ -116,7 +116,7 @@ Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top
 - 同窗口比较，replace 在 `6/12` 个窗口更好、`6/12` 个窗口更差；
 - 选股集中度没有明显改善，12 窗口仍只选到 31 只不同股票，`688521` 仍高频出现。
 
-当时结论：替代式 rank 明显优于追加式 rank，但没有稳定超过 noid，因此先保留为候选实验档。后续 `v1.4.5/v1.4.7/v1.4.8` 的 24 窗口公平复核更新了判断：`noid-rank-replace` 是当前最强单模型候选，并已作为默认提交配置。后续特征工程细节见 [feature_engineering.md](feature_engineering.md)。
+当时结论：替代式 rank 明显优于追加式 rank，但没有稳定超过 noid，因此先保留为候选实验档。后续 `v1.4.5/v1.4.7/v1.4.8` 的 24 窗口公平复核更新了判断：`noid-rank-replace` 是当前 Transformer 单模型保底配置。`v1.14.0` 起正式默认提交改为基于它和 LightGBM 的 `ensemble-gate`。后续特征工程细节见 [feature_engineering.md](feature_engineering.md)。
 
 `v1.3.3 noid-marketrel` 追加 8 个市场相对特征后，最近 3 窗口均值约 `-0.036034`，全弱于同窗口 noid，不建议扩跑 12 窗口。训练 loss 和梯度范数没有明显异常，问题更像特征把模型带向了外部收益更差的选股池。
 
@@ -124,7 +124,7 @@ Lookahead 让部分内部验证曲线略平滑，但没有明显改变最终 top
 
 当前结论：`v1.3.3` 和 `v1.3.4` 都没有显示出继续细分相对特征的价值。后续 24 窗口复核后，主提交配置已改为 `noid-rank-replace`；不要把 rank-lite 或 marketrel 升为默认。
 
-`v1.6.0 noid-rank-cleanrisk` 已跑完 24 窗口，均值和最差窗口都明显变差，说明这组清洗启发的流动性/回撤风险特征当前实现未通过。`v1.6.1 noid-rank-multiperiod` 也在 24 窗口明显变差，均值约 `-0.012037`，相对 `v1.4.5 rank-replace` 只在 `5/24` 个窗口胜出。`v1.6.2 noid-rank-breadth` 已跑 6 窗口并明显变差，单列市场宽度暂不扩跑。`v1.7.0 noid-rank-momdelta` 和 `v1.8.0 noid-rank-riskadj` 的 6 窗口也偏弱，不扩 12/24。后续新方向按 [实验纪律与分级验证](experiment_protocol.md) 走 `6 -> 12 -> 24`，默认策略仍保持 `noid-rank-replace`；同版本只增大 `--windows` 时可加 `--resume` 增量扩跑。
+`v1.6.0 noid-rank-cleanrisk` 已跑完 24 窗口，均值和最差窗口都明显变差，说明这组清洗启发的流动性/回撤风险特征当前实现未通过。`v1.6.1 noid-rank-multiperiod` 也在 24 窗口明显变差，均值约 `-0.012037`，相对 `v1.4.5 rank-replace` 只在 `5/24` 个窗口胜出。`v1.6.2 noid-rank-breadth` 已跑 6 窗口并明显变差，单列市场宽度暂不扩跑。`v1.7.0 noid-rank-momdelta` 和 `v1.8.0 noid-rank-riskadj` 的 6 窗口也偏弱，不扩 12/24。后续新方向按 [实验纪律与分级验证](experiment_protocol.md) 走 `6 -> 12 -> 24`，单模型对照仍优先使用 `noid-rank-replace`；同版本只增大 `--windows` 时可加 `--resume` 增量扩跑。
 
 ## 10. 当前策略
 
@@ -287,12 +287,23 @@ train.log
 
 赛事文档要求代码可在 i7-13650H、16GB 内存、RTX 4060 8GB 显存、50GB 存储上运行；预测不超过 5 分钟，训练不超过 8 小时，运行时不得联网。
 
-当前取舍：
+当前正式取舍：
 
-- `full` 默认最多 6 个 epoch，并启用早停，避免完整训练失控；
+- 默认提交入口为 `ensemble-gate`，训练一个 Transformer 主模型和一个 LightGBM 防守模型；
+- 默认正式强度为 `BDC_SUBMISSION_STRENGTH=strong`，Transformer 使用全部可打标签目标日和全部股票，最多 40 epoch、早停耐心值 8；LightGBM 使用最近 240 个训练目标日和 600 棵树；
+- `validated` 保留 `v1.13.4` 同口径源模型预算，适合最终前快速复核；
+- `max` 会进一步加宽 Transformer 并增加 LightGBM 树数，只应在本地完整计时确认安全后使用；
 - 默认特征工程进程数为 6，避免在 16GB 内存机器上开太多进程；
 - 设备选择仍是 `CUDA -> MPS -> CPU`，赛方 4060 会优先用 CUDA，本机没有 CUDA 时自动退回 CPU；
 - 正式预测只生成 `result.csv`，不能本地提前知道未来 5 个交易日真实收益。
+
+耗时估计依据：
+
+- `v1.13.0` 受控采样 Transformer 24 窗口平均训练约 43 秒；
+- `v1.13.2` LightGBM 24 窗口平均训练约 9 秒；
+- `v1.2.14 noid-full` 全目标日、全股票 Transformer 3 窗口平均训练约 12 分钟，单窗口约 9 到 19 分钟。
+
+因此默认 `strong` 预计远低于 8 小时，但它改变了正式训练覆盖面，不等价于 `v1.13.4` 的严格验证预算。提交前如果发现耗时、输出或本地后验表现异常，应先回退到 `BDC_SUBMISSION_STRENGTH=validated`，而不是继续加大到 `max`。
 
 提交前至少跑一次：
 

@@ -7,7 +7,7 @@
 推荐使用 Python 3.10 到 3.12。项目依赖由 `pyproject.toml` 和 `uv.lock` 固定，主要依赖包括：
 
 - `torch`：深度学习模型训练与推理；
-- `pandas`、`numpy`、`scikit-learn`、`joblib`：数据处理、标准化和模型产物保存；
+- `pandas`、`numpy`、`scikit-learn`、`joblib`、`lightgbm`：数据处理、表格模型训练和模型产物保存；
 - `TA-Lib`：技术指标特征工程；
 - `tqdm`、`tensorboard`、`tensorboardX`：进度展示和训练日志；
 - `baostock`、`akshare`：本地数据获取脚本可能使用，正式复现运行不依赖联网调用。
@@ -55,16 +55,19 @@ uv sync
 
 本项目当前不使用外部预训练模型，也不依赖外部 embedding、词典或额外不可公开数据。
 
-训练产物由本项目 `train.sh` 从输入数据重新训练得到，主要保存到 `model/` 目录。默认正式提交使用 `rank-replace` 单模型，完整训练会生成：
+训练产物由本项目 `train.sh` 从输入数据重新训练得到，主要保存到 `model/` 目录。默认正式提交使用 Transformer + LightGBM 双模型门控集成，完整训练会生成：
 
 ```text
-model/rank_replace/
+model/submission/primary_rank_replace/
+model/submission/lgbm_rank_replace/
 ```
 
 其中包括：
 
-- `best_model.pth`：内部验证集 `final_score` 最优的模型参数；
-- `scaler.pkl`：训练集特征标准化器；
+- `primary_rank_replace/best_model.pth`：Transformer 内部验证集 `final_score` 最优的模型参数；
+- `primary_rank_replace/scaler.pkl`：Transformer 训练集特征标准化器；
+- `lgbm_rank_replace/model.pkl`：LightGBM 回归模型；
+- `lgbm_rank_replace/features.json`：LightGBM 特征列和股票列表；
 - `config.json`：训练时配置快照；
 - `final_score.txt`：最佳 epoch、停止原因和训练摘要；
 - `training_history.csv`：逐 epoch 训练记录；
@@ -74,7 +77,7 @@ model/rank_replace/
 
 ### 整体思路介绍
 
-本项目把股票选择建模为横截面排序任务。对每个目标交易日，模型同时看到多只股票各自过去一段时间的量价和技术指标序列，输出每只股票的排序分数。正式预测默认使用 `rank-replace` 单模型取 top5，当前默认等权重 `0.2`。
+本项目把股票选择建模为横截面排序任务。对每个目标交易日，模型基于多只股票各自过去一段时间的量价和技术指标输出排序分数。正式预测默认使用 `rank-replace` Transformer 作为进攻主模型，LightGBM 作为防守模型；当 Transformer top5 的历史短期过热程度达到阈值时，切换到低过热的集成候选，否则保留 Transformer top5。最终默认 top5 等权重 `0.2`。
 
 标签使用未来第 1 个交易日开盘价到未来第 5 个交易日开盘价的收益率：
 
@@ -94,11 +97,12 @@ return = (open_t5 - open_t1) / open_t1
 - 支持 walk-forward 历史窗口验证，平时调参不依赖正式未来标签；
 - 生成完整候选排名和预测诊断文件，便于检查固定选股池和排序质量；
 - 支持通过环境变量控制特征组、模型规模、训练窗口、股票抽样和调参 profile；
-- 正式提交入口默认使用当前验证更强的 `rank-replace` 单模型；两模型集成保留为可选模式。
+- 正式提交入口默认使用当前同口径验证更强的 Transformer + LightGBM 过热门控集成；
+- 保留 LightGBM 单模型和 Transformer `rank-replace` 单模型作为回退模式，避免正式预测路径无法产出 `result.csv`。
 
 ### 网络结构
 
-核心模型为 `StockTransformer`，定义在 `code/src/model.py`。主要模块：
+主模型为 `StockTransformer`，定义在 `code/src/model.py`。主要模块：
 
 - `PositionalEncoding`：为股票历史序列加入时间位置信息；
 - `TransformerEncoder`：编码每只股票的历史序列；
@@ -127,7 +131,7 @@ return = (open_t5 - open_t1) / open_t1
 
 特征工程位于 `code/src/utils.py`，包括移动均线、指数均线、成交量变化、RSI、MACD、KDJ、布林带、ATR、波动率、收益率、价差等。
 
-部分实验还支持横截面 rank 特征、市场相对特征、趋势质量特征和移除股票编号特征，这些由环境变量控制。当前 `train.sh` 默认使用 39 特征，移除 `instrument` 股票编号输入，并用横截面 rank 替换部分绝对量价尺度特征。
+部分实验还支持横截面 rank 特征、市场相对特征、趋势质量特征和移除股票编号特征，这些由环境变量控制。当前正式入口默认使用 39 特征，移除 `instrument` 股票编号输入，并用横截面 rank 替换部分绝对量价尺度特征。Transformer 和 LightGBM 使用同一套 rank-replace 特征口径。
 
 ### 损失函数
 
@@ -143,17 +147,18 @@ return = (open_t5 - open_t1) / open_t1
 
 当前没有使用图像或文本类数据扩增。训练样本扩展主要来自时间滚动：每个可构造未来收益标签的交易日都会形成一个横截面排序样本。
 
-调试模式会进一步限制训练目标日数量和每日股票数量，以缩短本地运行时间。当前正式提交默认的 `rank-replace` 档也使用受控采样：最近 60 个训练目标日、每日最多 120 只股票；原始 `single` 配置和部分 `full` 实验才会按配置文件默认值使用更多数据。
+调试模式会进一步限制训练目标日数量和每日股票数量，以缩短本地运行时间。正式默认强度为 `BDC_SUBMISSION_STRENGTH=strong`：Transformer 使用全部可打标签目标日和全部股票，LightGBM 使用最近 240 个训练目标日和全部股票。若需要复现 `v1.13.4` 同口径实验，可设置 `BDC_SUBMISSION_STRENGTH=validated`；若本地计时确认安全，可试 `max`。
 
 ### 模型选择
 
-正式提交默认使用 `rank-replace` 单模型：
+正式提交默认使用 `ensemble-gate` 双模型：
 
-- 39 个基础特征；
-- 移除 `instrument` 股票编号特征；
-- 用当日横截面 rank 替换部分绝对量价尺度特征。
+- 进攻源：`primary_rank_replace`，StockTransformer，39 个基础特征，移除 `instrument`，横截面 rank 替换绝对量价特征；
+- 防守源：`lgbm_rank_replace`，LightGBM 表格回归模型，使用同一套 rank-replace 特征；
+- 门控策略：`ensemble_gate_overheat_top5`，默认阈值 `BDC_GATE_OVERHEAT_THRESHOLD=0.65`；
+- 回退路径：集成预测失败时默认尝试 LightGBM 单模型；也可手动运行 `BDC_SUBMISSION_MODE=rank-replace sh test.sh` 使用 Transformer 单模型。
 
-两模型集成仍可通过 `sh train.sh ensemble` 和 `sh test.sh ensemble` 启用。集成会让 `noid` 和 `noid_rank_replace` 分别输出 top5，再从并集中按历史低波动优先选回 5 只股票。当前 24 窗口验证中，集成低于 `rank-replace` 单模型，因此不作为默认提交策略。
+`v1.13.4` 的 24 窗口同口径验证中，过热门控集成均值和正分窗口数优于当前 Transformer 单模型；LightGBM 单模型均值略高于 Transformer、波动更小，因此作为正式预测失败时的第一回退。
 
 ### 算法的其他细节
 
@@ -162,7 +167,7 @@ return = (open_t5 - open_t1) / open_t1
 - 学习率调度：默认 `ReduceLROnPlateau` 风格的平台调度；
 - 早停：验证分数连续若干 epoch 未明显提升时停止训练；
 - 梯度裁剪：默认启用；
-- 设备选择：按 `CUDA -> MPS -> CPU` 自动选择；
+- Transformer 设备选择：按 `CUDA -> MPS -> CPU` 自动选择；LightGBM 使用 CPU 线程；
 - 股票代码仍用于分组、构造序列和输出结果，不代表一定作为模型输入特征。
 
 ## 训练流程
@@ -176,15 +181,15 @@ sh train.sh
 训练流程：
 
 1. 读取 `data/stock_data.csv` 或赛事方挂载的 `data/stock_data`；
-2. 按 `rank-replace` 配置训练单模型；
+2. 按 `ensemble-gate` 配置训练 Transformer 主模型和 LightGBM 防守模型；
 3. 标准化股票代码和日期；
 4. 按股票分组并行计算对应特征；
 5. 构造未来第 1 到第 5 个交易日开盘收益标签；
 6. 按时间顺序切分训练集和内部验证集；
 7. 把每个目标交易日组织成一个横截面排序样本；
-8. 使用 `StockTransformer` 训练排序模型；
-9. 根据验证集 `final_score` 保存 `best_model.pth`；
-10. 保存 `scaler.pkl`、配置快照、训练历史和日志。
+8. 使用 `StockTransformer` 训练进攻排序模型；
+9. 使用 LightGBM 训练防守表格模型；
+10. 保存模型、特征说明、配置快照、训练历史和日志。
 
 快速调试入口：
 
@@ -200,6 +205,8 @@ debug 模式会使用较小模型、较短序列、较少训练目标日和股�
 BDC_NUM_EPOCHS=8 sh train.sh
 BDC_USE_INSTRUMENT_FEATURE=0 sh train.sh
 BDC_STOCK_DATA_FILE=data/stock_data.csv sh train.sh
+BDC_SUBMISSION_STRENGTH=validated sh train.sh
+BDC_SUBMISSION_MODE=lgbm sh train.sh
 ```
 
 更多训练和调参说明见：
@@ -218,11 +225,11 @@ sh test.sh
 
 推理流程：
 
-1. 读取训练阶段保存的 `best_model.pth`、`scaler.pkl` 和 `config.json`；
-2. 使用 `rank-replace` 模型对全部候选股票打分；
+1. 读取训练阶段保存的 Transformer 与 LightGBM 模型；
+2. 分别对全部候选股票打分；
 3. 读取不晚于提交截止日的历史行情数据；
 4. 根据提交截止日寻找未来连续 5 个合理交易日；
-5. 按模型分数取 topK，默认 top5；
+5. 计算 Transformer top5 的预测日前历史过热 rank 均值，按门控规则决定保留主模型还是启用防守候选；
 6. 生成比赛提交文件 `output/result.csv`。
 
 默认提交截止日为 `2026-08-02`。如果预测窗口候选起始日是周末、节假日或无交易数据日期，代码会向后跳到合理交易日。
@@ -241,18 +248,20 @@ stock_id,weight
 600000,0.2
 ```
 
-最多 5 只股票，权重和不超过 1。当前默认策略是 `rank-replace` 模型 top5 等权重 `0.2`。如需做仓位实验，可用 `BDC_TOP_K` 控制输出股票数、`BDC_TOTAL_EXPOSURE` 控制总仓位；默认仍是 `BDC_TOP_K=5`、`BDC_TOTAL_EXPOSURE=1.0`。`output/result_scores.csv` 是完整候选排名诊断文件，不是提交文件。
+最多 5 只股票，权重和不超过 1。当前默认策略是集成门控后的 top5 等权重 `0.2`。如需做仓位实验，可用 `BDC_TOP_K` 控制输出股票数、`BDC_TOTAL_EXPOSURE` 控制总仓位；默认仍是 `BDC_TOP_K=5`、`BDC_TOTAL_EXPOSURE=1.0`。`output/result_scores.csv` 是完整候选排名诊断文件，不是提交文件。
 
-如果需要运行原始单模型配置或可选集成，可设置：
+如果需要运行回退或原始单模型配置，可设置：
 
 ```bash
+BDC_SUBMISSION_MODE=lgbm sh train.sh
+BDC_SUBMISSION_MODE=lgbm sh test.sh
+BDC_SUBMISSION_MODE=rank-replace sh train.sh
+BDC_SUBMISSION_MODE=rank-replace sh test.sh
 BDC_SUBMISSION_MODE=single sh train.sh
 BDC_SUBMISSION_MODE=single sh test.sh
-sh train.sh ensemble
-sh test.sh ensemble
 ```
 
-其中 `single` 是原始单模型配置，`ensemble` 是两模型集成候选。
+其中 `lgbm` 是正式第一回退，`rank-replace` 是 Transformer 保底，`single` 是原始单模型配置。
 
 可选参数示例：
 

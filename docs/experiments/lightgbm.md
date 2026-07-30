@@ -146,7 +146,7 @@ sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final
 - 新增依赖 `lightgbm`；
 - 新增 `train_lgbm.py`、`predict_lgbm.py`；
 - walk-forward 通过 `BDC_MODEL_KIND=lgbm` 调用 LightGBM 入口；
-- 当前正式提交默认仍是 `rank-replace` Transformer 单模型。
+- `v1.14.0` 起正式提交默认使用 Transformer + LightGBM 过热门控集成，LightGBM 是防守源和第一回退。
 
 ## v1.13.2 同口径复现
 
@@ -159,3 +159,25 @@ sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final
 - LightGBM top20 后验收益约 `0.004303`，好于 Transformer 的约 `-0.000422`；真实 top5 进入预测 top20 的总命中数为 `22`，高于 Transformer 的 `17`。
 
 结论：LightGBM 单独 top5 只略高于当前重跑的 Transformer，且最差窗口更低，不适合直接替换主线。但它的候选池质量和正分窗口数更好，适合作为门控防守源。`v1.13.3/4` 使用 `v1.13.0 + v1.13.2` 后，过热门控均值明显高于两个单源模型，说明 LightGBM 的价值主要在“需要防守时提供替代候选”。
+
+## 正式提交用法
+
+`v1.14.0` 起，默认正式训练会训练 LightGBM：
+
+```bash
+sh train.sh
+sh test.sh
+```
+
+单独运行 LightGBM 回退：
+
+```bash
+BDC_SUBMISSION_MODE=lgbm sh train.sh
+BDC_SUBMISSION_MODE=lgbm sh test.sh
+```
+
+正式强度由 `BDC_SUBMISSION_STRENGTH` 控制：
+
+- `validated`：最近 120 个训练目标日、300 棵树，对齐 `v1.13.2/v1.13.4` 的验证预算；
+- `strong`：默认，最近 240 个训练目标日、600 棵树；
+- `max`：全目标日、900 棵树，只建议本地计时确认安全后使用。

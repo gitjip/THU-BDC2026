@@ -1,11 +1,11 @@
 # THU-BigDataCompetition-2026-baseline 项目说明
 
-本文件从根目录 `README.md` 迁移而来，用于保留项目结构和开发说明。根目录 `README.md` 已改为赛事代码规范要求的审查说明格式。
+本文件从根目录说明迁移而来，用于保留项目结构和开发说明。根目录 `readme.md` 是赛事代码规范要求的审查说明格式。
 
 本项目是一个面向沪深300成分股的排序学习选股方案：
 
 - 输入：每只股票过去一段时间的量价与技术特征序列；
-- 模型：`StockTransformer`，同时建模单股票时序模式与股票间交互；
+- 模型：正式默认使用 `StockTransformer` 主模型与 LightGBM 防守模型；
 - 输出：对同一天全部候选股票打分并排序，最终输出前5只股票，当前默认等权重 `0.2`。
 
 ## 1. 项目目标与整体流程
@@ -18,8 +18,8 @@
 2. 做特征工程，支持 39 特征或 `158+39` 特征；
 3. 构建标签：未来收益率，代码中为 `open_t1` 到 `open_t5` 的相对收益；
 4. 按真实交易日组织排序样本：每个样本是一日内多只股票的序列与目标；
-5. 训练排序模型，监控 `final_score` 并保存最优权重；
-6. 使用训练好的 `best_model.pth` 和 `scaler.pkl` 对提交截止日之后的未来5个交易日生成 top5 选股结果。
+5. 训练 Transformer 排序模型和 LightGBM 表格模型；
+6. 使用两个模型对提交截止日之后的未来5个交易日生成候选排名，并按过热门控规则输出 top5。
 
 ## 2. 代码结构说明
 
@@ -75,15 +75,17 @@
 - `training_history.csv`：逐 epoch 训练记录；
 - `train.log`：训练日志。
 
-### [predict.py](../../code/src/predict.py) 和 [ensemble_predict.py](../../code/src/ensemble_predict.py)
+### [predict.py](../../code/src/predict.py)、[predict_lgbm.py](../../code/src/predict_lgbm.py) 和 [ensemble_predict.py](../../code/src/ensemble_predict.py)
 
-正式推理入口 `test.sh` 默认调用 `predict.py`，使用当前验证更强的 `rank-replace` 单模型。流程：
+正式推理入口 `test.sh` 默认调用 `ensemble_predict.py`，使用 `primary_rank_replace` Transformer 与 `lgbm_rank_replace` LightGBM。流程：
 
 1. 加载历史数据，确定提交截止日和未来5个目标交易日；
-2. 使用 `model/rank_replace` 对全部可预测股票打分；
-3. 取模型 top5，默认等权重 `0.2`，输出到 `output/result.csv`。
+2. 分别用 `model/submission/primary_rank_replace` 和 `model/submission/lgbm_rank_replace` 对全部可预测股票打分；
+3. 计算 Transformer top5 的预测日前短期过热 rank 均值；
+4. 若过热均值达到阈值，切到低过热防守候选；否则保留 Transformer top5；
+5. 默认等权重 `0.2`，输出到 `output/result.csv`。
 
-`ensemble_predict.py` 保留为候选模式，可通过 `sh test.sh ensemble` 启用。它会分别运行 `model/ensemble/noid` 和 `model/ensemble/noid_rank_replace`，再从两个 top5 的并集中按历史低波动优先选回 5 只。
+如果集成预测异常，`test.sh` 默认尝试 LightGBM 单模型回退。`BDC_SUBMISSION_MODE=rank-replace` 可手动使用 Transformer 单模型保底。
 
 默认提交截止日为 `2026-08-02`。如果候选起始日不是交易日，代码会向后跳到合理交易日。`--as-of-date` 仅用于本地调试的数据截断，不能晚于提交截止日。
 

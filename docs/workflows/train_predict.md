@@ -37,19 +37,20 @@ sh train.sh
 训练时会：
 
 1. 读取 `stock_data`；
-2. 按 `rank-replace` 配置训练单模型；
+2. 按正式 `ensemble-gate` 配置训练两个源模型：Transformer `primary_rank_replace` 和 LightGBM `lgbm_rank_replace`；
 3. 统一股票代码为 6 位字符串；
 4. 用最近 `val_days` 个可打标签交易日做验证集；
 5. 用未来第 1 个到第 5 个交易日开盘价计算标签；
-6. 按验证集 `final_score` 保存最佳模型；
-7. 根据验证表现自动降低学习率，并在连续无明显提升时早停；
-8. 保存模型、标准化器和日志。
+6. Transformer 按验证集 `final_score` 保存最佳模型，并根据验证表现自动降低学习率和早停；
+7. LightGBM 保存表格回归模型与特征列；
+8. 保存模型、标准化器、特征说明和日志。
 
 主要输出：
 
-- `model/rank_replace/best_model.pth`
-- `model/rank_replace/scaler.pkl`
-- `model/rank_replace/config.json`
+- `model/submission/primary_rank_replace/best_model.pth`
+- `model/submission/primary_rank_replace/scaler.pkl`
+- `model/submission/lgbm_rank_replace/model.pkl`
+- `model/submission/lgbm_rank_replace/features.json`
 
 快速调试运行：
 
@@ -64,7 +65,7 @@ debug 模式默认会：
 - 验证集只取最近 5 个目标交易日；
 - 每个交易日固定抽样 60 只股票参与训练；
 - 最多训练 4 个 epoch，若验证分数连续 2 个 epoch 无明显提升会提前停止；
-- 保存到 `model/rank_replace_debug/`，不会覆盖正式模型；
+- 保存到 `model/ensemble_debug/`，不会覆盖正式模型；
 - 关闭 TensorBoard，减少调试时生成的文件。
 
 这样做是为了调试流程和代码错误，不是为了获得最佳成绩。完整训练仍使用 `sh train.sh`。
@@ -87,7 +88,7 @@ sh test.sh
 2026-08-03, 2026-08-04, 2026-08-05, 2026-08-06, 2026-08-07
 ```
 
-预测会读取不晚于提交截止日的最新可用历史数据，使用 `rank-replace` 模型生成候选排名，输出：
+预测会读取不晚于提交截止日的最新可用历史数据，分别使用 Transformer 和 LightGBM 生成候选排名，再按过热门控策略输出：
 
 ```text
 output/result.csv
@@ -114,20 +115,52 @@ stock_id,weight
 600000,0.2
 ```
 
-最多 5 只股票，权重和不能超过 1。当前默认逻辑是 `rank-replace` 模型 top5 等权重 `0.2`。
+最多 5 只股票，权重和不能超过 1。当前默认逻辑是 `ensemble_gate_overheat_top5` 选出的 top5 等权重 `0.2`。门控规则只使用预测日前历史数据：如果 Transformer top5 的短期过热 rank 均值不低于 `BDC_GATE_OVERHEAT_THRESHOLD=0.65`，则从两个源模型 top5 并集中按低过热优先选回 5 只；否则保留 Transformer top5。
 
-LightGBM 当前只作为 walk-forward 实验档接入，profile 为 `noid-rank-lgbm`；正式 `train.sh/test.sh` 默认仍使用 `rank-replace` Transformer 单模型。只有在多窗口验证通过并单独修改提交入口后，才应把 LightGBM 用于正式提交。
+如果集成预测异常，`test.sh` 默认尝试 LightGBM 单模型回退。也可以显式设置 `BDC_ENABLE_PREDICT_FALLBACK=0` 让集成失败时直接报错。
 
-如果要运行原始单模型配置或可选集成，可显式启用：
+如果要运行回退或原始单模型配置，可显式启用：
 
 ```bash
+BDC_SUBMISSION_MODE=lgbm sh train.sh
+BDC_SUBMISSION_MODE=lgbm sh test.sh
+BDC_SUBMISSION_MODE=rank-replace sh train.sh
+BDC_SUBMISSION_MODE=rank-replace sh test.sh
 BDC_SUBMISSION_MODE=single sh train.sh
 BDC_SUBMISSION_MODE=single sh test.sh
-sh train.sh ensemble
-sh test.sh ensemble
 ```
 
-其中 `single` 是原始单模型配置，`ensemble` 是两模型集成候选。
+其中 `lgbm` 是正式第一回退，`rank-replace` 是 Transformer 保底，`single` 是原始单模型配置。
+
+## 4.1 正式训练强度与耗时预估
+
+正式入口通过 `BDC_SUBMISSION_STRENGTH` 控制训练强度：
+
+- `validated`：复现 `v1.13.4` 同口径源模型。Transformer 使用最近 60 个训练目标日、每日 120 只股票，LightGBM 使用最近 120 个训练目标日。适合最终前快速复核。
+- `strong`：默认正式强度。Transformer 使用全部可打标签目标日和全部股票，最多 40 epoch、早停耐心值 8；LightGBM 使用最近 240 个训练目标日、600 棵树。目标是在不接近 8 小时上限的前提下利用更多训练数据。
+- `max`：更激进。Transformer 小幅加宽到 `d_model=128`，最多 60 epoch；LightGBM 使用全目标日、900 棵树。只建议在本地完整计时确认安全后使用。
+
+当前可依据的历史耗时：
+
+- `v1.13.0`，24 个受控采样 Transformer 窗口平均训练约 43 秒；
+- `v1.13.2`，24 个 LightGBM 窗口平均训练约 9 秒；
+- `v1.2.14 noid-full`，3 个全目标日、全股票 Transformer 窗口平均训练约 12 分钟，单窗口约 9 到 19 分钟。
+
+因此默认 `strong` 预计在本机 CPU 上大概率是十几分钟到一小时级别，赛方 RTX 4060 环境通常不会更慢到接近 8 小时；正式预测历史上集成窗口平均约 21 秒，默认双模型预测预计仍远低于 5 分钟。由于 `strong/max` 没有完整 24 窗口验证，提交前建议至少做一次本地正式计时：
+
+```bash
+sh train.sh --dry-run
+sh test.sh --dry-run
+time sh train.sh
+time sh test.sh
+```
+
+如果 `strong` 的本地结果或耗时异常，可回退到：
+
+```bash
+BDC_SUBMISSION_STRENGTH=validated sh train.sh
+BDC_SUBMISSION_STRENGTH=validated sh test.sh
+```
 
 ## 5. 本地调试与自测
 
@@ -168,12 +201,12 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `sequence_length`：每只股票输入过去多少个交易日；默认提交模型为 45，原始单模型配置默认 60。
 - `label_horizon`：标签跨度，默认未来第 5 个交易日。
 - `val_days`：训练过程内部验证集目标交易日数量，默认 5。
-- `train_target_days`：训练目标交易日数量限制；`config.py` 默认 0 表示不限制，当前 `train.sh` 提交默认 `rank-replace` 使用 60，debug 使用 24。
-- `max_stocks_per_day`：每个交易日抽样股票数；`config.py` 默认 0 表示不抽样，当前 `train.sh` 提交默认 `rank-replace` 使用 120，debug 使用 60。
-- `num_epochs`：最大训练轮数；默认提交模型为 30，早停可能提前结束。
+- `train_target_days`：训练目标交易日数量限制；`config.py` 默认 0 表示不限制，当前正式 `strong` 的 Transformer 为 0，LightGBM 为 240，debug 使用 24。
+- `max_stocks_per_day`：每个交易日抽样股票数；`config.py` 默认 0 表示不抽样，当前正式 `strong` 不抽样，debug 会限制样本量。
+- `num_epochs`：最大训练轮数；正式 `strong` Transformer 为 40，早停可能提前结束。
 - `learning_rate`：默认提交模型为 `3e-5`，debug `3e-5`。
 - `lr_scheduler`：默认 `plateau`，验证 `final_score` 停滞时降低学习率。
-- `early_stopping_patience`：当前 `train.sh` 提交默认 `rank-replace` 为 5，debug 为 2；设为 0 可关闭早停。
+- `early_stopping_patience`：正式 `strong` 的 Transformer 为 8，`validated` 为 5，debug 为 2；设为 0 可关闭早停。
 - `loss_temperature`：默认 1.0；控制模型预测分数在 listwise loss 中的 softmax 温度。
 - `loss_target_temperature`：默认等于 `loss_temperature`；可用 `BDC_LOSS_TARGET_TEMPERATURE=0.05` 让真实收益目标分布更尖锐，强化 top 股票排序信号。
 - `use_instrument_feature`：默认开启；可用 `BDC_USE_INSTRUMENT_FEATURE=0` 从模型输入中移除股票编号特征。
@@ -186,8 +219,9 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `use_trend_quality_features`：默认关闭；可用 `BDC_USE_TREND_QUALITY_FEATURES=1` 追加趋势质量特征。
 - `use_clean_risk_features`：默认关闭；可用 `BDC_USE_CLEAN_RISK_FEATURES=1` 追加无成交、流动性和回撤风险特征。
 - `use_multi_period_features`：默认关闭；可用 `BDC_USE_MULTI_PERIOD_FEATURES=1` 追加 3/5/10/20/40 日多周期基础特征。
-- `BDC_SUBMISSION_MODE`：默认 `rank-replace`；设为 `single` 可回退原始单模型入口，设为 `ensemble` 可运行两模型集成候选。
-- `BDC_SELECTION_STRATEGY`：单模型默认 `model_top5`，可用 `low_vol_then_rank_top5`；集成模式可用 `ensemble_low_vol_top5` 或 `ensemble_low_overheat_top5`。
+- `BDC_SUBMISSION_MODE`：默认 `ensemble-gate`；设为 `lgbm` 可只运行 LightGBM 回退，设为 `rank-replace` 可只运行 Transformer 单模型，设为 `single` 可回退原始单模型入口。
+- `BDC_SUBMISSION_STRENGTH`：正式训练强度，默认 `strong`，可选 `validated`、`strong`、`max`。
+- `BDC_SELECTION_STRATEGY`：单模型默认 `model_top5`，可用 `low_vol_then_rank_top5`；集成模式默认 `ensemble_gate_overheat_top5`。
 - `top_k`：默认 5；可用 `BDC_TOP_K=3` 只输出前 3 只股票，范围 1 到 5。
 - `total_exposure`：默认 1.0；可用 `BDC_TOTAL_EXPOSURE=0.8` 控制总仓位，范围 0 到 1，未使用权重相当于现金。
 - `stage2_pool_size`：默认 10；低波动后处理从模型前多少名中选回 5 只。
@@ -203,6 +237,14 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 
 ```bash
 BDC_FAST_DEV=1 sh train.sh
+sh train.sh --dry-run
+sh test.sh --dry-run
+BDC_SUBMISSION_STRENGTH=validated sh train.sh
+BDC_SUBMISSION_STRENGTH=max sh train.sh --dry-run
+BDC_SUBMISSION_MODE=lgbm sh train.sh
+BDC_SUBMISSION_MODE=lgbm sh test.sh
+BDC_SUBMISSION_MODE=rank-replace sh train.sh
+BDC_SUBMISSION_MODE=rank-replace sh test.sh
 BDC_TRAIN_TARGET_DAYS=80 BDC_MAX_STOCKS_PER_DAY=180 sh train.sh debug
 BDC_NUM_EPOCHS=6 BDC_EARLY_STOPPING_PATIENCE=2 sh train.sh debug
 BDC_USE_INSTRUMENT_FEATURE=0 BDC_USE_MARKET_RELATIVE_FEATURES=1 sh train.sh debug

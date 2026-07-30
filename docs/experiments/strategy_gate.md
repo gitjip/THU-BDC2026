@@ -149,7 +149,7 @@ sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final
 
 同一批 24 窗口上的阈值复盘显示，`BDC_GATE_OVERHEAT_THRESHOLD=0.65` 的事后均值约 `0.020205`，高于 `0.70` 的 `0.018227`。这只说明阈值 `0.65` 值得另起版本做小步复核，不能直接把本次结论改写成“0.65 已证明更好”。
 
-注意：这仍不改变 `train.sh/test.sh` 默认提交路径。正式默认仍是 rank-replace 单模型。
+历史注意：`v1.12.4` 当时还没有改变 `train.sh/test.sh` 默认提交路径；`v1.14.0` 起正式默认已切到 `ensemble-gate`。
 
 ## v1.13.* 公平复现计划
 
@@ -193,4 +193,17 @@ BDC_ENSEMBLE_SOURCES=v1.13.0,v1.13.2 BDC_GATE_OVERHEAT_THRESHOLD=0.65 sh tune.sh
 - 阈值 `0.65` 触发 `10/24` 个窗口，新增触发 `window_03` 和 `window_17`，两个窗口均改善；
 - 低过热门控仍漏掉 `window_23`、`window_24` 这类低分窗口，最差窗口仍约 `-0.068497`。
 
-结论：过热门控在当前同口径对照下重新成立，`0.65` 暂时优于 `0.70`，可以作为当前候选。但它主要提高均值和正分窗口，还没有解决尾部风险；如果后续要接入正式提交默认，需要先明确提交时如何训练并复用 Transformer 与 LightGBM 两个最终模型，同时保留单模型回退路径。
+结论：过热门控在当前同口径对照下重新成立，`0.65` 暂时优于 `0.70`，可以作为当前正式提交候选。但它主要提高均值和正分窗口，还没有解决尾部风险。
+
+## 正式提交接入
+
+`v1.14.0` 起，`train.sh/test.sh` 默认接入 `ensemble-gate`：
+
+- `sh train.sh` 训练 `primary_rank_replace` Transformer 和 `lgbm_rank_replace` LightGBM；
+- `sh test.sh` 默认使用 `ensemble_gate_overheat_top5`，阈值 `BDC_GATE_OVERHEAT_THRESHOLD=0.65`；
+- `BDC_SUBMISSION_MODE=lgbm` 可单独运行 LightGBM 回退；
+- `BDC_SUBMISSION_MODE=rank-replace` 可单独运行 Transformer 保底；
+- `BDC_SUBMISSION_STRENGTH=validated` 可复现 `v1.13.4` 源模型训练预算；
+- 默认 `BDC_SUBMISSION_STRENGTH=strong` 会使用更多训练数据，提交前必须做一次正式计时和结果复核。
+
+注意：正式接入解决的是“赛方从 train.sh/test.sh 可复现双模型门控结果”的工程问题，不表示尾部风险已经被完全消除。如果默认 `strong` 在本地正式训练后表现或耗时异常，应先回到 `validated` 强度。
