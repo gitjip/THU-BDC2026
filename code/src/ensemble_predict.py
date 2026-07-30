@@ -260,6 +260,7 @@ def main() -> None:
     logger.info("提交集成预测模式: %s", "debug" if debug else "official")
     logger.info("集成策略: %s", args.ensemble_selection_strategy)
     logger.info("过热门控阈值: %s", args.gate_overheat_threshold)
+    logger.info("数据截止锁: %s", config.get("stock_data_cutoff_date") or "disabled")
     logger.info("最终输出: %s", output_path)
     logger.info("完整候选排名输出: %s", scores_output_path)
 

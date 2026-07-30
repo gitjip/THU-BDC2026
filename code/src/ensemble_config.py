@@ -23,8 +23,10 @@ SUBMISSION_STRENGTH = _env_choice(
     "strong",
     {"validated", "strong", "max"},
 )
+DATA_CUTOFF_DATE = os.environ.get("BDC_DATA_CUTOFF_DATE", "2026-07-27").strip()
 
 OFFICIAL_BASE_ENV = {
+    "BDC_DATA_CUTOFF_DATE": DATA_CUTOFF_DATE,
     "BDC_FEATURE_NUM": "39",
     "BDC_SEQUENCE_LENGTH": "45",
     "BDC_VAL_DAYS": "5",

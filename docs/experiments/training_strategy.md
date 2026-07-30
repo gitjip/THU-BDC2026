@@ -291,6 +291,7 @@ train.log
 
 - 默认提交入口为 `ensemble-gate`，训练一个 Transformer 主模型和一个 LightGBM 防守模型；
 - 默认正式强度为 `BDC_SUBMISSION_STRENGTH=strong`，Transformer 使用全部可打标签目标日和全部股票，最多 40 epoch、早停耐心值 8；LightGBM 使用最近 240 个训练目标日和 600 棵树；
+- 默认数据截止锁为 `BDC_DATA_CUTOFF_DATE=2026-07-27`，训练和预测都只使用不晚于该日期的数据，优先保证本地 `result.csv` 与赛方复现一致；
 - `validated` 保留 `v1.13.4` 同口径源模型预算，适合最终前快速复核；
 - `max` 会进一步加宽 Transformer 并增加 LightGBM 树数，只应在本地完整计时确认安全后使用；
 - 默认特征工程进程数为 6，避免在 16GB 内存机器上开太多进程；
@@ -304,6 +305,8 @@ train.log
 - `v1.2.14 noid-full` 全目标日、全股票 Transformer 3 窗口平均训练约 12 分钟，单窗口约 9 到 19 分钟。
 
 因此默认 `strong` 预计远低于 8 小时，但它改变了正式训练覆盖面，不等价于 `v1.13.4` 的严格验证预算。提交前如果发现耗时、输出或本地后验表现异常，应先回退到 `BDC_SUBMISSION_STRENGTH=validated`，而不是继续加大到 `max`。
+
+注意：调参验证仍应尽量使用更新、更接近正式预测期的数据；正式提交阶段当前选择锁到 `2026-07-27`，是为了复现稳定，不代表更新数据没有价值。如果要改用更新数据，必须同步重新训练、预测并提交新的 `result.csv`。
 
 提交前至少跑一次：
 

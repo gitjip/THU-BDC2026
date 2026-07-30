@@ -49,6 +49,7 @@
 - `v1.13.1` 落地复现实验规范：公平对照必须同 commit 或显式说明差异、同 `stock_data` 摘要、同窗口日期和同训练预算；`validate_experiments.py` 增加 worst3/CVaR、风险调整分、配对胜负和改善集中度，`walk_forward` 记录并校验复用源实验的 commit/profile/data 摘要。
 - `v1.13.2/3/4` 完成同口径门控复现：`v1.13.2 LightGBM` 均值约 `0.009367`，略高于 `v1.13.0`；`v1.13.3` 过热门控阈值 `0.70` 均值约 `0.019635`；`v1.13.4` 阈值 `0.65` 均值约 `0.021579`，相对 `v1.13.0` 配对均值差约 `+0.013801`、胜/负/平 `9/1/14`。这次源实验 `data_signature` 均匹配，门控方向重新站住，但最差窗口仍为 `-0.068497`，不能说尾部风险已解决。
 - `v1.14.0` 将正式 `train.sh/test.sh` 默认切到 `ensemble-gate`：Transformer `primary_rank_replace` 作为进攻源，LightGBM `lgbm_rank_replace` 作为防守源，默认门控阈值 `0.65`；LightGBM 是第一回退，Transformer `rank-replace` 是最后保底。默认正式强度改为 `BDC_SUBMISSION_STRENGTH=strong`，会使用更多训练数据，但提交前仍需本地完整计时确认。
+- `v1.14.1` 增加正式复现数据截止锁：默认 `BDC_DATA_CUTOFF_DATE=2026-07-27`，统一作用于训练、Transformer 预测、LightGBM 预测和集成重排。目标是避免赛方挂载更新 `stock_data` 后自动使用 7.27 之后数据，导致本地 `result.csv` 与赛方复现结果漂移；如要使用更新数据，必须显式覆盖该变量并重新训练预测。
 
 ## 版本记录
 
@@ -109,6 +110,7 @@
 | `v1.13.3` | `ensemble-gate-overheat` 阈值 `0.70`，源 `v1.13.0+v1.13.2` | 24 | `0.019635` | 相对 `v1.13.0` 配对均值差约 `+0.011857`，触发 `8/24` 个窗口；同口径下门控收益成立。 |
 | `v1.13.4` | `ensemble-gate-overheat` 阈值 `0.65`，源 `v1.13.0+v1.13.2` | 24 | `0.021579` | 相对 `v1.13.0` 配对均值差约 `+0.013801`，触发 `10/24` 个窗口；均值和正分窗口优于 `0.70`，但最差窗口不变，先作为当前候选。 |
 | `v1.14.0` | 正式提交入口切到 `ensemble-gate` | - | - | `sh train.sh` 默认训练 Transformer + LightGBM；`sh test.sh` 默认过热门控集成并输出 `output/result.csv`。新增 `BDC_SUBMISSION_STRENGTH=validated/strong/max`，默认 `strong`；不运行新 walk-forward。 |
+| `v1.14.1` | 正式复现数据截止锁 | - | - | 默认 `BDC_DATA_CUTOFF_DATE=2026-07-27`，训练和预测统一忽略晚于 7.27 的数据，优先保证本地结果和赛方复现一致；不训练新模型。 |
 
 ## 后续记录规范
 

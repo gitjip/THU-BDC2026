@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 
 
+DEFAULT_DATA_CUTOFF_DATE = "2026-07-27"
+
 REQUIRED_COLUMNS = {
     "股票代码",
     "日期",
@@ -193,10 +195,46 @@ def read_market_data(path: str | Path) -> pd.DataFrame:
     return df
 
 
+def resolve_data_cutoff_date(cutoff_date: str | pd.Timestamp | None = None) -> pd.Timestamp | None:
+    raw_value = (
+        os.environ.get("BDC_DATA_CUTOFF_DATE", DEFAULT_DATA_CUTOFF_DATE)
+        if cutoff_date is None
+        else cutoff_date
+    )
+    if raw_value is None:
+        return None
+
+    raw_text = str(raw_value).strip()
+    if raw_text == "":
+        return None
+    return parse_date(raw_text, "BDC_DATA_CUTOFF_DATE")
+
+
+def apply_data_cutoff(
+    df: pd.DataFrame,
+    cutoff_date: str | pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, pd.Timestamp | None, int]:
+    cutoff = resolve_data_cutoff_date(cutoff_date)
+    if cutoff is None:
+        return df, None, 0
+
+    rows_before = len(df)
+    result = df[df["日期"] <= cutoff].copy()
+    if result.empty:
+        raise ValueError(f"数据中没有不晚于截止锁 {cutoff.date()} 的可用历史数据")
+
+    result.attrs.update(df.attrs)
+    dropped_rows = rows_before - len(result)
+    result.attrs["data_cutoff_date"] = cutoff.strftime("%Y-%m-%d")
+    result.attrs["data_cutoff_dropped_rows"] = int(dropped_rows)
+    return result, cutoff, int(dropped_rows)
+
+
 def load_stock_data(
     data_path: str | Path,
     data_file: str | Path | None = None,
     allow_train_fallback: bool = True,
+    cutoff_date: str | pd.Timestamp | None = None,
     logger: logging.Logger | None = None,
 ) -> tuple[pd.DataFrame, Path]:
     path = resolve_stock_data_file(
@@ -205,6 +243,7 @@ def load_stock_data(
         allow_train_fallback=allow_train_fallback,
     )
     df = read_market_data(path)
+    df, applied_cutoff, cutoff_dropped_rows = apply_data_cutoff(df, cutoff_date)
 
     if logger:
         dates = sorted(df["日期"].unique())
@@ -218,13 +257,19 @@ def load_stock_data(
             pd.Timestamp(dates[0]).date(),
             pd.Timestamp(dates[-1]).date(),
         )
+        if applied_cutoff is not None:
+            logger.info(
+                "数据截止锁: BDC_DATA_CUTOFF_DATE=%s, 忽略晚于截止日的数据=%s 行",
+                applied_cutoff.date(),
+                cutoff_dropped_rows,
+            )
         if summary:
             logger.info(
                 "数据清洗: 平盘补零=%s 行 / %s 个缺失单元, 删除异常=%s 行, 清洗后=%s 行",
                 summary.get("flat_rows_filled", 0),
                 summary.get("filled_cells", 0),
                 summary.get("dropped_rows", 0),
-                summary.get("rows_after_clean", len(df)),
+                len(df),
             )
     return df, path
 

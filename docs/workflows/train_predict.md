@@ -26,6 +26,14 @@ uv sync
 
 读取 `stock_data` 时，代码会对“开高低收完全相同且成交量/成交额/换手率/涨跌幅缺失”的平盘样本做保守补零，避免把停牌或无成交行直接丢掉；其余仍然缺失必要字段的异常行会在数据入口直接删除并记录日志。
 
+正式提交默认启用复现锁：
+
+```bash
+BDC_DATA_CUTOFF_DATE=2026-07-27
+```
+
+训练、Transformer 预测、LightGBM 预测和集成重排都会忽略晚于该日期的数据。这样做是为了让本地生成的 `result.csv` 和赛方复现时的训练预测口径一致，避免赛方挂载了更新 `stock_data` 后自动吃到新数据导致结果漂移。若以后明确要使用更新数据，必须显式覆盖这个环境变量并重新跑完整训练和预测；设置为空值可解除该锁。
+
 ## 3. 训练
 
 完整训练运行：
@@ -88,7 +96,7 @@ sh test.sh
 2026-08-03, 2026-08-04, 2026-08-05, 2026-08-06, 2026-08-07
 ```
 
-预测会读取不晚于提交截止日的最新可用历史数据，分别使用 Transformer 和 LightGBM 生成候选排名，再按过热门控策略输出：
+预测默认先按 `BDC_DATA_CUTOFF_DATE=2026-07-27` 截断历史数据，再分别使用 Transformer 和 LightGBM 生成候选排名，并按过热门控策略输出：
 
 ```text
 output/result.csv
@@ -106,7 +114,7 @@ sh test.sh --target-start-date 2026-08-08
 
 如果预测窗口候选起始日是周末、节假日或历史数据中没有交易记录，代码会一直向后跳到合理交易日。未来休市日可用 `BDC_MARKET_HOLIDAYS` 或 `--market-holidays` 指定。
 
-`--as-of-date` 只用于本地调试，表示最多使用哪一天之前的历史数据；它不能晚于提交截止日。
+`--as-of-date` 只用于本地调试，表示预测任务最多使用哪一天之前的历史数据；它不能晚于提交截止日。正式复现优先看 `BDC_DATA_CUTOFF_DATE`，因为它同时作用于训练和预测。
 
 提交文件格式为：
 
@@ -221,6 +229,7 @@ BDC_STOCK_DATA_FILE=data/train.csv sh test.sh
 - `use_multi_period_features`：默认关闭；可用 `BDC_USE_MULTI_PERIOD_FEATURES=1` 追加 3/5/10/20/40 日多周期基础特征。
 - `BDC_SUBMISSION_MODE`：默认 `ensemble-gate`；设为 `lgbm` 可只运行 LightGBM 回退，设为 `rank-replace` 可只运行 Transformer 单模型，设为 `single` 可回退原始单模型入口。
 - `BDC_SUBMISSION_STRENGTH`：正式训练强度，默认 `strong`，可选 `validated`、`strong`、`max`。
+- `BDC_DATA_CUTOFF_DATE`：训练和预测统一数据截止锁，默认 `2026-07-27`。若显式设为空值，则使用数据文件中所有可用日期。
 - `BDC_SELECTION_STRATEGY`：单模型默认 `model_top5`，可用 `low_vol_then_rank_top5`；集成模式默认 `ensemble_gate_overheat_top5`。
 - `top_k`：默认 5；可用 `BDC_TOP_K=3` 只输出前 3 只股票，范围 1 到 5。
 - `total_exposure`：默认 1.0；可用 `BDC_TOTAL_EXPOSURE=0.8` 控制总仓位，范围 0 到 1，未使用权重相当于现金。

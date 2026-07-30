@@ -233,5 +233,6 @@ config = {
     ),
     "data_path": "./data",
     "stock_data_file": None,  # 默认自动寻找 data/stock_data.csv 或 data/stock_data
+    "stock_data_cutoff_date": os.environ.get("BDC_DATA_CUTOFF_DATE", "2026-07-27").strip(),
     "prediction_output_path": "./output/result.csv",
 }
