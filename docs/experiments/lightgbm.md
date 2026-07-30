@@ -147,3 +147,15 @@ sh tune.sh v1.12.4 ensemble-gate-overheat --windows 24 --skip-final
 - 新增 `train_lgbm.py`、`predict_lgbm.py`；
 - walk-forward 通过 `BDC_MODEL_KIND=lgbm` 调用 LightGBM 入口；
 - 当前正式提交默认仍是 `rank-replace` Transformer 单模型。
+
+## v1.13.2 同口径复现
+
+`v1.13.2 noid-rank-lgbm` 使用当前代码和当前 `stock_data` 重跑 24 窗口，作为 `v1.13.0 noid-rank-replace` 的同口径防守源。
+
+结果：
+
+- `v1.13.2 LightGBM`：均值约 `0.009367`，worst3 约 `-0.060486`，CVaR20 约 `-0.049518`，最差约 `-0.075276`，正分窗口 `16/24`；
+- `v1.13.0 Transformer`：均值约 `0.007778`，worst3 约 `-0.065648`，CVaR20 约 `-0.052621`，最差约 `-0.068497`，正分窗口 `11/24`；
+- LightGBM top20 后验收益约 `0.004303`，好于 Transformer 的约 `-0.000422`；真实 top5 进入预测 top20 的总命中数为 `22`，高于 Transformer 的 `17`。
+
+结论：LightGBM 单独 top5 只略高于当前重跑的 Transformer，且最差窗口更低，不适合直接替换主线。但它的候选池质量和正分窗口数更好，适合作为门控防守源。`v1.13.3/4` 使用 `v1.13.0 + v1.13.2` 后，过热门控均值明显高于两个单源模型，说明 LightGBM 的价值主要在“需要防守时提供替代候选”。
