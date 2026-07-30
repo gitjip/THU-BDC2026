@@ -1,0 +1,31 @@
+2026-07-30 10:21:29 | INFO | 提交集成预测模式: official
+2026-07-30 10:21:29 | INFO | 集成策略: ensemble_gate_overheat_top5
+2026-07-30 10:21:29 | INFO | 过热门控阈值: 0.65
+2026-07-30 10:21:29 | INFO | 数据截止锁: 2026-07-27
+2026-07-30 10:21:29 | INFO | 最终输出: output/result.csv
+2026-07-30 10:21:29 | INFO | 完整候选排名输出: output/result_scores.csv
+2026-07-30 10:21:29 | INFO | 
+2026-07-30 10:21:29 | INFO | ========================================================================
+2026-07-30 10:21:29 | INFO | 源模型预测: primary_rank_replace | kind=transformer -> temp/submission_ensemble/primary_rank_replace/result_scores.csv
+2026-07-30 10:21:29 | INFO | ========================================================================
+2026-07-30 10:21:29 | INFO | 运行命令: /app/.venv/bin/python code/src/predict.py --output temp/submission_ensemble/primary_rank_replace/result.csv --scores-output temp/submission_ensemble/primary_rank_replace/result_scores.csv --selection-strategy model_top5 --submission-date 2026-08-02
+2026-07-30 10:21:41 | INFO | 源模型预测完成: primary_rank_replace | 耗时=12s
+2026-07-30 10:21:41 | INFO | 
+2026-07-30 10:21:41 | INFO | ========================================================================
+2026-07-30 10:21:41 | INFO | 源模型预测: lgbm_rank_replace | kind=lgbm -> temp/submission_ensemble/lgbm_rank_replace/result_scores.csv
+2026-07-30 10:21:41 | INFO | ========================================================================
+2026-07-30 10:21:41 | INFO | 运行命令: /app/.venv/bin/python code/src/predict_lgbm.py --output temp/submission_ensemble/lgbm_rank_replace/result.csv --scores-output temp/submission_ensemble/lgbm_rank_replace/result_scores.csv --selection-strategy model_top5 --submission-date 2026-08-02
+2026-07-30 10:21:47 | INFO | 源模型预测完成: lgbm_rank_replace | 耗时=6s
+2026-07-30 10:21:48 | INFO | 读取数据: data/stock_data.csv | 行数=184926 | 股票数=300 | 交易日=620 | 范围=2024-01-02 ~ 2026-07-27
+2026-07-30 10:21:48 | INFO | 数据截止锁: BDC_DATA_CUTOFF_DATE=2026-07-27, 忽略晚于截止日的数据=0 行
+2026-07-30 10:21:48 | INFO | 数据清洗: 平盘补零=258 行 / 1032 个缺失单元, 删除异常=0 行, 清洗后=184926 行
+2026-07-30 10:21:48 | INFO | 数据截止候选日 2026-08-02 无数据，改用最近已知交易日 2026-07-27
+2026-07-30 10:21:48 | INFO | 当前 stock_data 最新可用日早于提交截止日: as_of=2026-07-27, submission=2026-08-02；正式提交前应更新数据
+2026-07-30 10:21:48 | INFO | 集成重排历史数据: data/stock_data.csv | as_of=2026-07-27 | 目标窗口=2026-08-03, 2026-08-04, 2026-08-05, 2026-08-06, 2026-08-07
+2026-07-30 10:21:48 | INFO | 集成候选池股票数: 7
+2026-07-30 10:21:48 | INFO | 源模型 Top5: {'primary_rank_replace': ['002916', '688256', '688072', '300661', '002353'], 'lgbm_rank_replace': ['002916', '688082', '688256', '688521', '300661']}
+2026-07-30 10:21:48 | INFO | 最终 Selected: 688521, 300661, 688256, 688082, 002916
+2026-07-30 10:21:48 | INFO | 结果已写入: output/result.csv
+2026-07-30 10:21:48 | INFO | 集成元数据已写入: output/ensemble_prediction.json
+2026-07-30 10:21:48 | INFO | 完整候选排名已写入: output/result_scores.csv
+2026-07-30 10:21:48 | INFO | 集成预测耗时: 18s

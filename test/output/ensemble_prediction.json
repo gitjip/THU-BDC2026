@@ -1,0 +1,51 @@
+{
+  "mode": "submission_ensemble",
+  "selection_strategy": "ensemble_gate_overheat_top5",
+  "top_k": 5,
+  "total_exposure": 1.0,
+  "stage2_vol_window": 20,
+  "gate_overheat_threshold": 0.65,
+  "gate_use_defense": true,
+  "gate_primary_source": "primary_rank_replace",
+  "gate_primary_top5_overheat_mean": 0.6519999999999999,
+  "target_dates": [
+    "2026-08-03",
+    "2026-08-04",
+    "2026-08-05",
+    "2026-08-06",
+    "2026-08-07"
+  ],
+  "sources": [
+    {
+      "label": "primary_rank_replace",
+      "output_dir": "./model/submission/primary_rank_replace",
+      "source_top5": [
+        "002916",
+        "688256",
+        "688072",
+        "300661",
+        "002353"
+      ]
+    },
+    {
+      "label": "lgbm_rank_replace",
+      "output_dir": "./model/submission/lgbm_rank_replace",
+      "source_top5": [
+        "002916",
+        "688082",
+        "688256",
+        "688521",
+        "300661"
+      ]
+    }
+  ],
+  "selected": [
+    "688521",
+    "300661",
+    "688256",
+    "688082",
+    "002916"
+  ],
+  "candidate_count": 7,
+  "source_predict_seconds": 17.801772893002635
+}
