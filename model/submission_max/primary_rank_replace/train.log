@@ -1,0 +1,297 @@
+2026-07-30 17:13:03 | INFO | 运行模式: full
+2026-07-30 17:13:03 | INFO | 训练设备: cpu
+2026-07-30 17:13:03 | INFO | CUDA 不可用，训练会主要依赖 CPU；Intel Arc 通常不会被 PyTorch CUDA 自动使用
+2026-07-30 17:13:03 | INFO | CPU 核心数: 14
+2026-07-30 17:13:03 | INFO | 随机种子: 42
+2026-07-30 17:13:03 | INFO | PyTorch CPU 线程数: 4
+2026-07-30 17:13:03 | INFO | 读取数据: data/stock_data.csv | 行数=184926 | 股票数=300 | 交易日=620 | 范围=2024-01-02 ~ 2026-07-27
+2026-07-30 17:13:03 | INFO | 数据截止锁: BDC_DATA_CUTOFF_DATE=2026-07-27, 忽略晚于截止日的数据=0 行
+2026-07-30 17:13:03 | INFO | 数据清洗: 平盘补零=258 行 / 1032 个缺失单元, 删除异常=0 行, 清洗后=184926 行
+2026-07-30 17:13:03 | INFO | 训练目标日期: 2024-03-12 ~ 2026-07-13
+2026-07-30 17:13:03 | INFO | 训练取数范围: 2024-01-02 ~ 2026-07-13 (包含序列上下文)
+2026-07-30 17:13:03 | INFO | 验证目标日期: 2026-07-14 ~ 2026-07-20
+2026-07-30 17:13:03 | INFO | 验证取数范围: 2026-05-12 ~ 2026-07-27 (包含 44 个交易日上下文)
+2026-07-30 17:13:03 | INFO | 股票映射数量: 300
+2026-07-30 17:13:03 | INFO | 开始特征工程: 股票数=300, 进程数=6
+2026-07-30 17:13:06 | INFO | 特征工程: 已应用横截面 rank 特征 mode=replace, replace_set=default, rank列=22, 输入特征=38
+2026-07-30 17:13:07 | INFO | 特征工程: 已从输入特征中移除 instrument，股票代码仅用于分组和输出
+2026-07-30 17:13:07 | INFO | 开始验证集特征工程: 股票数=300, 进程数=6
+2026-07-30 17:13:09 | INFO | 验证集特征工程: 已应用横截面 rank 特征 mode=replace, replace_set=default, rank列=22, 输入特征=38
+2026-07-30 17:13:09 | INFO | 验证集特征工程: 已从输入特征中移除 instrument，股票代码仅用于分组和输出
+2026-07-30 17:13:09 | INFO | 特征数量: 38
+2026-07-30 17:13:09 | INFO | Scaler 已保存: ./model/submission_max/primary_rank_replace/scaler.pkl
+2026-07-30 17:13:09 | INFO | 正在创建排序数据集（向量化加速版本）...
+2026-07-30 17:13:10 | INFO | Step 1: 为每只股票生成滑动窗口
+2026-07-30 17:13:10 | INFO | Step 2: 按日期聚合窗口
+2026-07-30 17:13:10 | INFO | Step 3: 构建每日样本并计算 relevance
+2026-07-30 17:13:11 | INFO | 成功创建 561 个训练样本
+2026-07-30 17:13:11 | INFO | 每个样本平均包含 298.1 只股票
+2026-07-30 17:13:11 | INFO | 正在创建排序数据集（向量化加速版本）...
+2026-07-30 17:13:11 | INFO | Step 1: 为每只股票生成滑动窗口
+2026-07-30 17:13:11 | INFO | Step 2: 按日期聚合窗口
+2026-07-30 17:13:11 | INFO | Step 3: 构建每日样本并计算 relevance
+2026-07-30 17:13:11 | INFO | 成功创建 5 个训练样本
+2026-07-30 17:13:11 | INFO | 每个样本平均包含 300.0 只股票
+2026-07-30 17:13:11 | INFO | 训练集样本数: 561
+2026-07-30 17:13:11 | INFO | 验证集样本数: 5
+2026-07-30 17:13:11 | INFO | 模型参数量: 371842
+2026-07-30 17:13:12 | INFO | 训练策略: epochs<=60, lr=3e-05, weight_decay=1e-05, optimizer=adamw, lookahead_k=5, lookahead_alpha=0.5, scheduler=plateau, lr_patience=1, lr_threshold=0.0001, early_stopping_patience=10, grad_clip=True, loss_temperature=1.0, loss_target_temperature=1.0
+2026-07-30 17:13:12 | INFO | 
+========================================================================
+开始训练
+========================================================================
+2026-07-30 17:13:12 | INFO | 
+========================================================================
+Epoch 1/60
+========================================================================
+2026-07-30 17:15:28 | INFO | Train Loss: 1.0545 | avg_grad_norm=0.474893 | 耗时=2m16s
+2026-07-30 17:15:28 | INFO | Train pred_return_sum: 0.0109
+2026-07-30 17:15:28 | INFO | Train max_return_sum: 0.8894
+2026-07-30 17:15:28 | INFO | Train random_return_sum: 0.0183
+2026-07-30 17:15:28 | INFO | Train ratio_pred: -0.0426
+2026-07-30 17:15:28 | INFO | Train ratio_random: -0.0316
+2026-07-30 17:15:28 | INFO | Train final_score: -0.0071
+2026-07-30 17:15:28 | INFO | Eval Loss: 1.0716 | 耗时=0s
+2026-07-30 17:15:28 | INFO | Eval pred_return_sum: 0.0117
+2026-07-30 17:15:28 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:15:28 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:15:28 | INFO | Eval ratio_pred: -0.0002
+2026-07-30 17:15:28 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:15:28 | INFO | Eval final_score: -0.0276
+2026-07-30 17:15:28 | INFO | 保存最佳模型: ./model/submission_max/primary_rank_replace/best_model.pth | final_score=-0.0276
+2026-07-30 17:15:28 | INFO | 当前学习率: 0.00003000
+2026-07-30 17:15:28 | INFO | Epoch 1 完成: 耗时=2m16s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:15:28 | INFO | 
+========================================================================
+Epoch 2/60
+========================================================================
+2026-07-30 17:17:44 | INFO | Train Loss: 1.0498 | avg_grad_norm=0.501543 | 耗时=2m16s
+2026-07-30 17:17:44 | INFO | Train pred_return_sum: 0.0307
+2026-07-30 17:17:44 | INFO | Train max_return_sum: 0.8901
+2026-07-30 17:17:44 | INFO | Train random_return_sum: 0.0192
+2026-07-30 17:17:44 | INFO | Train ratio_pred: -0.0158
+2026-07-30 17:17:44 | INFO | Train ratio_random: -0.0303
+2026-07-30 17:17:44 | INFO | Train final_score: 0.0156
+2026-07-30 17:17:45 | INFO | Eval Loss: 1.0963 | 耗时=0s
+2026-07-30 17:17:45 | INFO | Eval pred_return_sum: 0.0128
+2026-07-30 17:17:45 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:17:45 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:17:45 | INFO | Eval ratio_pred: 0.0053
+2026-07-30 17:17:45 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:17:45 | INFO | Eval final_score: -0.0218
+2026-07-30 17:17:45 | INFO | 保存最佳模型: ./model/submission_max/primary_rank_replace/best_model.pth | final_score=-0.0218
+2026-07-30 17:17:45 | INFO | 当前学习率: 0.00003000
+2026-07-30 17:17:45 | INFO | Epoch 2 完成: 耗时=2m16s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:17:45 | INFO | 
+========================================================================
+Epoch 3/60
+========================================================================
+2026-07-30 17:19:59 | INFO | Train Loss: 1.0467 | avg_grad_norm=0.512194 | 耗时=2m15s
+2026-07-30 17:19:59 | INFO | Train pred_return_sum: 0.0389
+2026-07-30 17:19:59 | INFO | Train max_return_sum: 0.8916
+2026-07-30 17:19:59 | INFO | Train random_return_sum: 0.0186
+2026-07-30 17:19:59 | INFO | Train ratio_pred: -0.0176
+2026-07-30 17:19:59 | INFO | Train ratio_random: -0.0310
+2026-07-30 17:19:59 | INFO | Train final_score: 0.0179
+2026-07-30 17:20:00 | INFO | Eval Loss: 1.1046 | 耗时=0s
+2026-07-30 17:20:00 | INFO | Eval pred_return_sum: -0.2696
+2026-07-30 17:20:00 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:20:00 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:20:00 | INFO | Eval ratio_pred: -0.3256
+2026-07-30 17:20:00 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:20:00 | INFO | Eval final_score: -0.3603
+2026-07-30 17:20:00 | INFO | 验证 final_score 未明显提升: 当前=-0.3603, 最佳=-0.0218, 连续未提升=1/10
+2026-07-30 17:20:00 | INFO | 当前学习率: 0.00003000
+2026-07-30 17:20:00 | INFO | Epoch 3 完成: 耗时=2m15s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:20:00 | INFO | 
+========================================================================
+Epoch 4/60
+========================================================================
+2026-07-30 17:22:15 | INFO | Train Loss: 1.0443 | avg_grad_norm=0.533494 | 耗时=2m15s
+2026-07-30 17:22:15 | INFO | Train pred_return_sum: 0.0558
+2026-07-30 17:22:15 | INFO | Train max_return_sum: 0.8901
+2026-07-30 17:22:15 | INFO | Train random_return_sum: 0.0187
+2026-07-30 17:22:15 | INFO | Train ratio_pred: -0.0483
+2026-07-30 17:22:15 | INFO | Train ratio_random: -0.0309
+2026-07-30 17:22:15 | INFO | Train final_score: 0.0027
+2026-07-30 17:22:15 | INFO | Eval Loss: 1.1219 | 耗时=0s
+2026-07-30 17:22:15 | INFO | Eval pred_return_sum: -0.0978
+2026-07-30 17:22:15 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:22:15 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:22:15 | INFO | Eval ratio_pred: -0.1370
+2026-07-30 17:22:15 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:22:15 | INFO | Eval final_score: -0.1623
+2026-07-30 17:22:15 | INFO | 验证 final_score 未明显提升: 当前=-0.1623, 最佳=-0.0218, 连续未提升=2/10
+2026-07-30 17:22:15 | INFO | 学习率调整: 0.00003000 -> 0.00001500
+2026-07-30 17:22:15 | INFO | Epoch 4 完成: 耗时=2m15s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:22:15 | INFO | 
+========================================================================
+Epoch 5/60
+========================================================================
+2026-07-30 17:24:24 | INFO | Train Loss: 1.0392 | avg_grad_norm=0.560941 | 耗时=2m09s
+2026-07-30 17:24:24 | INFO | Train pred_return_sum: 0.0625
+2026-07-30 17:24:24 | INFO | Train max_return_sum: 0.8882
+2026-07-30 17:24:24 | INFO | Train random_return_sum: 0.0182
+2026-07-30 17:24:24 | INFO | Train ratio_pred: -0.0243
+2026-07-30 17:24:24 | INFO | Train ratio_random: -0.0322
+2026-07-30 17:24:24 | INFO | Train final_score: 0.0246
+2026-07-30 17:24:24 | INFO | Eval Loss: 1.1216 | 耗时=0s
+2026-07-30 17:24:24 | INFO | Eval pred_return_sum: -0.0122
+2026-07-30 17:24:24 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:24:24 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:24:24 | INFO | Eval ratio_pred: -0.0388
+2026-07-30 17:24:24 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:24:24 | INFO | Eval final_score: -0.0625
+2026-07-30 17:24:24 | INFO | 验证 final_score 未明显提升: 当前=-0.0625, 最佳=-0.0218, 连续未提升=3/10
+2026-07-30 17:24:24 | INFO | 当前学习率: 0.00001500
+2026-07-30 17:24:24 | INFO | Epoch 5 完成: 耗时=2m09s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:24:24 | INFO | 
+========================================================================
+Epoch 6/60
+========================================================================
+2026-07-30 17:26:38 | INFO | Train Loss: 1.0387 | avg_grad_norm=0.542420 | 耗时=2m14s
+2026-07-30 17:26:38 | INFO | Train pred_return_sum: 0.0600
+2026-07-30 17:26:38 | INFO | Train max_return_sum: 0.8885
+2026-07-30 17:26:38 | INFO | Train random_return_sum: 0.0182
+2026-07-30 17:26:38 | INFO | Train ratio_pred: -0.0108
+2026-07-30 17:26:38 | INFO | Train ratio_random: -0.0322
+2026-07-30 17:26:38 | INFO | Train final_score: 0.0351
+2026-07-30 17:26:38 | INFO | Eval Loss: 1.1290 | 耗时=0s
+2026-07-30 17:26:38 | INFO | Eval pred_return_sum: -0.0449
+2026-07-30 17:26:38 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:26:38 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:26:38 | INFO | Eval ratio_pred: -0.0765
+2026-07-30 17:26:38 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:26:38 | INFO | Eval final_score: -0.1021
+2026-07-30 17:26:38 | INFO | 验证 final_score 未明显提升: 当前=-0.1021, 最佳=-0.0218, 连续未提升=4/10
+2026-07-30 17:26:38 | INFO | 学习率调整: 0.00001500 -> 0.00000750
+2026-07-30 17:26:38 | INFO | Epoch 6 完成: 耗时=2m15s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:26:38 | INFO | 
+========================================================================
+Epoch 7/60
+========================================================================
+2026-07-30 17:28:49 | INFO | Train Loss: 1.0373 | avg_grad_norm=0.578595 | 耗时=2m11s
+2026-07-30 17:28:49 | INFO | Train pred_return_sum: 0.0644
+2026-07-30 17:28:49 | INFO | Train max_return_sum: 0.8893
+2026-07-30 17:28:49 | INFO | Train random_return_sum: 0.0188
+2026-07-30 17:28:49 | INFO | Train ratio_pred: -0.0196
+2026-07-30 17:28:49 | INFO | Train ratio_random: -0.0309
+2026-07-30 17:28:49 | INFO | Train final_score: 0.0307
+2026-07-30 17:28:49 | INFO | Eval Loss: 1.1297 | 耗时=0s
+2026-07-30 17:28:49 | INFO | Eval pred_return_sum: -0.1063
+2026-07-30 17:28:49 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:28:49 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:28:49 | INFO | Eval ratio_pred: -0.1420
+2026-07-30 17:28:49 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:28:49 | INFO | Eval final_score: -0.1674
+2026-07-30 17:28:49 | INFO | 验证 final_score 未明显提升: 当前=-0.1674, 最佳=-0.0218, 连续未提升=5/10
+2026-07-30 17:28:49 | INFO | 当前学习率: 0.00000750
+2026-07-30 17:28:49 | INFO | Epoch 7 完成: 耗时=2m11s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:28:49 | INFO | 
+========================================================================
+Epoch 8/60
+========================================================================
+2026-07-30 17:31:07 | INFO | Train Loss: 1.0356 | avg_grad_norm=0.608389 | 耗时=2m18s
+2026-07-30 17:31:07 | INFO | Train pred_return_sum: 0.0754
+2026-07-30 17:31:07 | INFO | Train max_return_sum: 0.8913
+2026-07-30 17:31:07 | INFO | Train random_return_sum: 0.0188
+2026-07-30 17:31:07 | INFO | Train ratio_pred: -0.0199
+2026-07-30 17:31:07 | INFO | Train ratio_random: -0.0308
+2026-07-30 17:31:07 | INFO | Train final_score: 0.0310
+2026-07-30 17:31:07 | INFO | Eval Loss: 1.1305 | 耗时=0s
+2026-07-30 17:31:07 | INFO | Eval pred_return_sum: -0.1063
+2026-07-30 17:31:07 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:31:07 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:31:07 | INFO | Eval ratio_pred: -0.1420
+2026-07-30 17:31:07 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:31:07 | INFO | Eval final_score: -0.1674
+2026-07-30 17:31:07 | INFO | 验证 final_score 未明显提升: 当前=-0.1674, 最佳=-0.0218, 连续未提升=6/10
+2026-07-30 17:31:07 | INFO | 学习率调整: 0.00000750 -> 0.00000375
+2026-07-30 17:31:07 | INFO | Epoch 8 完成: 耗时=2m18s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:31:07 | INFO | 
+========================================================================
+Epoch 9/60
+========================================================================
+2026-07-30 17:33:25 | INFO | Train Loss: 1.0346 | avg_grad_norm=0.600311 | 耗时=2m18s
+2026-07-30 17:33:25 | INFO | Train pred_return_sum: 0.0908
+2026-07-30 17:33:25 | INFO | Train max_return_sum: 0.8881
+2026-07-30 17:33:25 | INFO | Train random_return_sum: 0.0179
+2026-07-30 17:33:25 | INFO | Train ratio_pred: -0.0024
+2026-07-30 17:33:25 | INFO | Train ratio_random: -0.0333
+2026-07-30 17:33:25 | INFO | Train final_score: 0.0483
+2026-07-30 17:33:25 | INFO | Eval Loss: 1.1295 | 耗时=0s
+2026-07-30 17:33:25 | INFO | Eval pred_return_sum: -0.1063
+2026-07-30 17:33:25 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:33:25 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:33:25 | INFO | Eval ratio_pred: -0.1420
+2026-07-30 17:33:25 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:33:25 | INFO | Eval final_score: -0.1674
+2026-07-30 17:33:25 | INFO | 验证 final_score 未明显提升: 当前=-0.1674, 最佳=-0.0218, 连续未提升=7/10
+2026-07-30 17:33:25 | INFO | 当前学习率: 0.00000375
+2026-07-30 17:33:25 | INFO | Epoch 9 完成: 耗时=2m18s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:33:25 | INFO | 
+========================================================================
+Epoch 10/60
+========================================================================
+2026-07-30 17:35:39 | INFO | Train Loss: 1.0353 | avg_grad_norm=0.594047 | 耗时=2m14s
+2026-07-30 17:35:39 | INFO | Train pred_return_sum: 0.0649
+2026-07-30 17:35:39 | INFO | Train max_return_sum: 0.8888
+2026-07-30 17:35:39 | INFO | Train random_return_sum: 0.0188
+2026-07-30 17:35:39 | INFO | Train ratio_pred: -0.0127
+2026-07-30 17:35:39 | INFO | Train ratio_random: -0.0308
+2026-07-30 17:35:39 | INFO | Train final_score: 0.0334
+2026-07-30 17:35:39 | INFO | Eval Loss: 1.1290 | 耗时=0s
+2026-07-30 17:35:39 | INFO | Eval pred_return_sum: -0.1057
+2026-07-30 17:35:39 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:35:39 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:35:39 | INFO | Eval ratio_pred: -0.1411
+2026-07-30 17:35:39 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:35:39 | INFO | Eval final_score: -0.1665
+2026-07-30 17:35:39 | INFO | 验证 final_score 未明显提升: 当前=-0.1665, 最佳=-0.0218, 连续未提升=8/10
+2026-07-30 17:35:39 | INFO | 学习率调整: 0.00000375 -> 0.00000188
+2026-07-30 17:35:39 | INFO | Epoch 10 完成: 耗时=2m14s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:35:39 | INFO | 
+========================================================================
+Epoch 11/60
+========================================================================
+2026-07-30 17:37:56 | INFO | Train Loss: 1.0342 | avg_grad_norm=0.596322 | 耗时=2m17s
+2026-07-30 17:37:56 | INFO | Train pred_return_sum: 0.0760
+2026-07-30 17:37:56 | INFO | Train max_return_sum: 0.8912
+2026-07-30 17:37:56 | INFO | Train random_return_sum: 0.0188
+2026-07-30 17:37:56 | INFO | Train ratio_pred: -0.0142
+2026-07-30 17:37:56 | INFO | Train ratio_random: -0.0309
+2026-07-30 17:37:56 | INFO | Train final_score: 0.0346
+2026-07-30 17:37:56 | INFO | Eval Loss: 1.1293 | 耗时=0s
+2026-07-30 17:37:56 | INFO | Eval pred_return_sum: -0.1057
+2026-07-30 17:37:56 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:37:56 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:37:56 | INFO | Eval ratio_pred: -0.1411
+2026-07-30 17:37:56 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:37:56 | INFO | Eval final_score: -0.1665
+2026-07-30 17:37:56 | INFO | 验证 final_score 未明显提升: 当前=-0.1665, 最佳=-0.0218, 连续未提升=9/10
+2026-07-30 17:37:56 | INFO | 当前学习率: 0.00000188
+2026-07-30 17:37:56 | INFO | Epoch 11 完成: 耗时=2m17s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:37:56 | INFO | 
+========================================================================
+Epoch 12/60
+========================================================================
+2026-07-30 17:40:09 | INFO | Train Loss: 1.0332 | avg_grad_norm=0.618367 | 耗时=2m13s
+2026-07-30 17:40:09 | INFO | Train pred_return_sum: 0.0809
+2026-07-30 17:40:09 | INFO | Train max_return_sum: 0.8916
+2026-07-30 17:40:09 | INFO | Train random_return_sum: 0.0190
+2026-07-30 17:40:09 | INFO | Train ratio_pred: -0.0093
+2026-07-30 17:40:09 | INFO | Train ratio_random: -0.0307
+2026-07-30 17:40:09 | INFO | Train final_score: 0.0381
+2026-07-30 17:40:09 | INFO | Eval Loss: 1.1300 | 耗时=0s
+2026-07-30 17:40:09 | INFO | Eval pred_return_sum: -0.1057
+2026-07-30 17:40:09 | INFO | Eval max_return_sum: 0.9215
+2026-07-30 17:40:09 | INFO | Eval random_return_sum: 0.0267
+2026-07-30 17:40:09 | INFO | Eval ratio_pred: -0.1411
+2026-07-30 17:40:09 | INFO | Eval ratio_random: 0.0264
+2026-07-30 17:40:09 | INFO | Eval final_score: -0.1665
+2026-07-30 17:40:09 | INFO | 验证 final_score 未明显提升: 当前=-0.1665, 最佳=-0.0218, 连续未提升=10/10
+2026-07-30 17:40:09 | INFO | 学习率调整: 0.00000188 -> 0.00000100
+2026-07-30 17:40:09 | INFO | Epoch 12 完成: 耗时=2m13s | history=./model/submission_max/primary_rank_replace/training_history.csv
+2026-07-30 17:40:09 | INFO | 触发早停: 连续 10 个 epoch 未超过最佳分数 -0.0218 + min_delta 0.000100
+2026-07-30 17:40:09 | INFO | 训练完成: 最佳 epoch=2, 最佳 final_score=-0.0218, 实际 epoch=12, 结束原因=early_stopping_patience_10, 总耗时=27m07s
+2026-07-30 17:40:09 | INFO | ########## 训练完成！最佳 final score: -0.0218 ##########

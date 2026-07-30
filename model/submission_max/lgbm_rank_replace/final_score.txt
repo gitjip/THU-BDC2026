@@ -1,0 +1,9 @@
+Model kind: lgbm
+Best epoch: 900
+Best final_score: -0.175825
+Train RMSE: 0.04973958
+Eval RMSE: 0.07243143
+Stop reason: fixed_estimators
+Total duration: 7s
+Total seconds: 7.213
+Training history: ./model/submission_max/lgbm_rank_replace/training_history.csv

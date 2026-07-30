@@ -1,0 +1,2 @@
+iteration,train_rmse,eval_rmse,train_final_score,eval_final_score,train_seconds,eval_seconds,feature_seconds
+900,0.04973957895040442,0.0724314344782102,0.5252190682009817,-0.17582533704922168,2.449,0.554,2.557
