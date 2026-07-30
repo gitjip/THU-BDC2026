@@ -4,3 +4,11 @@ __pycache__
 .venv
 .vscode
 .idea
+experiments
+test
+data
+output
+temp
+*.tar
+*.zip
+.DS_Store

@@ -216,6 +216,12 @@ def write_json(path: Path, payload: dict) -> None:
     )
 
 
+def metadata_output_path(output_path: Path) -> Path:
+    if output_path.name == "result.csv":
+        return output_path.parent / "ensemble_prediction.json"
+    return output_path.with_name(f"{output_path.stem}_ensemble_prediction.json")
+
+
 def read_prediction_scores_csv(path: Path) -> pd.DataFrame:
     frame = pd.read_csv(path, dtype={"stock_id": str, "股票代码": str})
     if "stock_id" not in frame.columns and "股票代码" in frame.columns:
@@ -334,12 +340,14 @@ def main() -> None:
         "candidate_count": int((scores["stage2_pool_member"] == True).sum()),
         "source_predict_seconds": total_predict_seconds,
     }
-    write_json(output_path.parent / "ensemble_prediction.json", metadata)
+    metadata_path = metadata_output_path(output_path)
+    write_json(metadata_path, metadata)
 
     logger.info("集成候选池股票数: %s", metadata["candidate_count"])
     logger.info("源模型 Top5: %s", source_top5)
     logger.info("最终 Selected: %s", ", ".join(metadata["selected"]))
     logger.info("结果已写入: %s", output_path)
+    logger.info("集成元数据已写入: %s", metadata_path)
     logger.info("完整候选排名已写入: %s", scores_output_path)
     logger.info("集成预测耗时: %s", format_duration(total_predict_seconds))
 
