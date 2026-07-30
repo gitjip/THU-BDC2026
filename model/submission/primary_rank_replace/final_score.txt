@@ -2,7 +2,7 @@ Best epoch: 7
 Best final_score: 0.099259
 Stopped epoch: 15
 Stop reason: early_stopping_patience_8
-Total duration: 27m53s
-Total seconds: 1673.458
+Total duration: 25m27s
+Total seconds: 1526.530
 Final learning_rate: 0.0000010000
 Training history: ./model/submission/primary_rank_replace/training_history.csv

@@ -5,5 +5,5 @@ Train RMSE: 0.04549689
 Eval RMSE: 0.07220846
 Stop reason: fixed_estimators
 Total duration: 4s
-Total seconds: 3.841
+Total seconds: 3.942
 Training history: ./model/submission/lgbm_rank_replace/training_history.csv

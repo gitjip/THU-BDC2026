@@ -72,5 +72,6 @@
     "output_dir": "./model/submission/primary_rank_replace",
     "data_path": "./data",
     "stock_data_file": null,
+    "stock_data_cutoff_date": "2026-07-27",
     "prediction_output_path": "./output/result.csv"
 }
